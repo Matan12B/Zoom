@@ -5,6 +5,7 @@ from Client.Comms.ClientComm import ClientComm
 from Client.Protocol import clientProtocol
 from Client.Logic.Host import Host
 from Client.Logic.callLogic import CallLogic
+from Server.ServerComm import ServerComm
 
 
 class Client:
@@ -13,14 +14,22 @@ class Client:
         self.port = port
         self.msgsQ = queue.Queue()
         self.comm = ClientComm(self.ip, self.port, self.msgsQ)
+        # using this server comm for now
         self.role = None
         self.username = ""
+        # keep password temp
+        self.password = ""
         self.meeting_code = None
+        self.active = None
         self.commands = {
             "sm" : self.start_meeting,
             "rjm": self.request_join_meeting,
             "gmc": self.get_meeting_code,
-            "ir": self.initialize_role
+            "ir": self.initialize_role,
+            "ls": self.get_login_status,
+            "ss": self.get_signup_status,
+            "cj": self.client_joined
+
         }
 
     def start(self):
@@ -33,7 +42,13 @@ class Client:
             daemon=True
         ).start()
 
-    def start_meeting(self, data=None):
+        time.sleep(0.2)
+        threading.Thread(
+            target=self.gui,
+            daemon=True
+        ).start()
+
+    def start_meeting(self):
         """
         Send a request to create a meeting
         """
@@ -42,7 +57,7 @@ class Client:
 
     def get_meeting_code(self, meeting_code):
         """
-        Receive meeting code from server
+        Receive meeting code from the server
         """
         self.meeting_code = meeting_code
         print("Meeting code:", self.meeting_code)
@@ -92,11 +107,72 @@ class Client:
         """
         while True:
             msg = self.msgsQ.get()
-
             opcode, data = clientProtocol.unpack(msg)
-
             if opcode in self.commands:
                 self.commands[opcode](data)
+
+    def get_login_status(self, status):
+        """
+
+        """
+        self.active = status
+
+    def get_signup_status(self, status):
+        """
+
+        """
+        self.active = status
+
+    def log_in(self, username, password):
+        """
+
+        """
+        msg = clientProtocol.build_login(username, password)
+        self.comm.send_msg(msg)
+
+    def sign_up(self, username, password):
+        """
+
+        """
+        msg = clientProtocol.build_register(username, password)
+        self.comm.send_msg(msg)
+
+    def gui(self):
+        """
+
+        """
+        #todo gui
+
+        # this is temp
+        while True:
+            choice = input("Enter choice (1/2):\n  1: log in\n  2: sign up\n> ").strip()
+            self.username = input("Enter username: ")
+            self.password = input("Enter password: ")
+            if choice == "1":
+                self.log_in(self.username, self.password)
+                break
+            elif choice == "2":
+                self.sign_up(self.username, self.password)
+                break
+            else:
+                print("Invalid choice")
+        if self.active is not None:
+            while True:
+                choice = input("Enter choice (1/2):\n  1: Open meeting\n  2: Join meeting\n> ").strip()
+                if choice == "1":
+                    self.start_meeting()
+                    break
+                elif choice == "2":
+                    self.request_join_meeting()
+                    break
+                else:
+                    print("Invalid choice")
+
+        else:
+            print("Invalid login")
+
+
+
 
 def main():
     ip = input("Enter ip")

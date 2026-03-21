@@ -53,6 +53,7 @@ class DiffiHelman:
         self.g = g
         self.private_key = None
         self.public_key = None
+        self.create_keys()
 
     def create_keys(self):
         """
@@ -60,8 +61,7 @@ class DiffiHelman:
         """
         self.private_key = random.randint(1, (self.p - 1))
         self.public_key = pow(self.g, self.private_key, self.p)
-    # def get_public_key(self):
-    #     return self.public_key
+
     def create_shared_key(self, other_public_key):
         """
         Create shared key and return it

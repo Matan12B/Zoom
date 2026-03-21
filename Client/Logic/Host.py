@@ -11,17 +11,26 @@ from Client.Comms.videoComm     import VideoComm
 from Client.Comms.audioComm     import AudioServer
 from Client.GUI.VideoDisplay    import VideoDisplay
 from Client.Protocol            import clientProtocol
+# TODO note this is a problem!
+from Client.Comms.ClientServerComm import ClientServer
+
+# current problems:
+# using server code in the client - should add a common server code
+# confusing workflow of starting meeting and comm with server
 
 class Host:
     def __init__(self, port, meeting_code, open_clients, comm):
-        self.host_comm = comm
         self.open_clients = open_clients
         self.microphone = None
         self.soc = socket.socket()
         self.msgQ = queue.Queue()
         self.display = VideoDisplay()
-        self.audio_comm = AudioServer(port, meeting_code, self.msgQ)
-        self.video_comm = VideoComm(port, meeting_code, self.msgQ)
+        self.host_comm = comm
+        self.host_server = ClientServer(port, self.msgQ, open_clients)
+        # todo add port to audio and video comm
+        self.audio_comm = AudioServer(port, meeting_code, self.msgQ, self.host_comm.open_clients)
+        self.video_comm = VideoComm(port, meeting_code, self.msgQ, self.host_comm.open_clients)
+        # for getting the current user ip
         hostname = socket.gethostname()
         self.ip = socket.gethostbyname(hostname)
         self.commands = {
@@ -57,6 +66,7 @@ class Host:
         ).start()
         threading.Thread(target=self.playback_loop, daemon=True).start()
         # TODO GUI
+        # start meeting
         try:
             while True:
                 frame = self.camera.get_frame()
@@ -193,6 +203,9 @@ class Host:
         :param username: The username of the client to connect.
         """
         pass  # Logic to connect the client
+        self.host_comm.connect_client(ip, username)
+        self.open_clients[ip] = username
+
 
 
 

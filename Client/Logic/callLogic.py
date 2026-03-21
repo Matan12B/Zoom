@@ -20,11 +20,11 @@ from Client.Protocol import clientProtocol
 class CallLogic:
     # todo video port audio port
     def __init__(self, port, key, open_clients, comm, audio_server_ip, video_server_ip):
-        self.call_comm = comm
         self.open_clients = open_clients
         self.soc = socket.socket()
         self.msgQ = queue.Queue()
         self.display = VideoDisplay()
+        self.call_comm = comm
         self.audio_comm = AudioClient(audio_server_ip, port, self.msgQ)
         self.video_comm = VideoComm(video_server_ip, port, self.msgQ)
         hostname = socket.gethostname()
@@ -167,7 +167,7 @@ class CallLogic:
             del self.open_clients[ip]
 
     # Connect the client
-    def handle_join(self, ip, username):
+    def handle_join(self, ip, port, username, key, state, video_port, audio_port):
         pass  # Connect the client
 
     def leave_call(self):

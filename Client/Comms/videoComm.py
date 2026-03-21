@@ -7,7 +7,7 @@ from Common.Cipher import AESCipher
 
 class VideoComm:
 
-    def __init__(self, port, key_string, msgQ=None, users=[]):
+    def __init__(self, port, key_string, msgQ=None, users={}):
         """
         Create comm objects queues and starts _receive_frames
         """
@@ -15,7 +15,7 @@ class VideoComm:
         self.udp_socket.bind(("0.0.0.0", port))
         self.AES = AESCipher(key_string)
         self.frameQ = queue.Queue()
-        self.users = users # list
+        self.users = users
         self.MAX_SIZE = 65507
         self.running = True
         threading.Thread(target=self._receive_frames, daemon=True).start()
@@ -54,6 +54,7 @@ class VideoComm:
         Add user to broadcast list
         """
         if (user_ip, user_port) not in self.users:
+            self.users[user_ip] =
             self.users.append((user_ip, user_port))
 
     def remove_user(self, user_ip, user_port):
@@ -70,8 +71,8 @@ class VideoComm:
         self.running = False
         try:
             self.udp_socket.shutdown(socket.SHUT_RDWR)
-        except:
-            pass
+        except Exception as e:
+            print("Close error:", e)
         self.udp_socket.close()
 
 
