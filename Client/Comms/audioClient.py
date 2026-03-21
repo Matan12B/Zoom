@@ -308,7 +308,7 @@ if __name__ == "__main__":
     elif mode == "client":
         print("Starting audio client, connecting to 127.0.0.1:1234...")
         recvQ = queue.Queue()
-        client = AudioClient("10.0.0.26", 1234, recvQ)
+        client = AudioClient("127.0.0.1", 1234, recvQ)
 
         # Wait for connection to establish
         time.sleep(1)

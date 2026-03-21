@@ -1,5 +1,5 @@
-
 from Client.Devices.Microphone import Microphone
+from Client.Devices.AudioOutputDevice import AudioOutput
 import socket
 import threading
 import queue
@@ -307,46 +307,38 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("\nServer shutting down...")
 
+
     elif mode == "client":
         print("Starting audio client, connecting to 127.0.0.1:1234...")
         recvQ = queue.Queue()
         client = AudioClient("127.0.0.1", 1234, recvQ)
+        # 🔊 NEW: import your audio classes
 
-        # Wait for connection to establish
+        mic = Microphone(volume=70, rate=16000, channels=1, chunk=1024)
+        speaker = AudioOutput(rate=16000, channels=1)
+        # Wait for connection
         time.sleep(1)
-
         if not client.open:
             print("Failed to connect to server")
             sys.exit(1)
-
-        print("Connected to server. Sending test audio chunks...")
-
-        # Send test audio chunks
+        print("Connected! Starting live audio...")
+        mic.start()
+        mic.unmute()
         try:
-            for i in range(5):
-                test_audio = f"Test audio chunk {i}".encode() * 100  # Create larger chunk
-                if client.send_audio(test_audio):
-                    print(f"Sent audio chunk {i}: {len(test_audio)} bytes")
-                else:
-                    print(f"Failed to send audio chunk {i}")
-                time.sleep(0.5)
-
-                # Check for received audio
+            while True:
+                # 🎙️ RECORD + SEND
+                audio_chunk = mic.record()
+                client.send_audio(audio_chunk)
+                # 🔊 RECEIVE + PLAy
                 while not recvQ.empty():
                     received_audio = recvQ.get()
-                    print(f"Received audio chunk: {len(received_audio)} bytes")
-
-            print("\nListening for incoming audio (Ctrl+C to stop)...")
-            while True:
-                if not recvQ.empty():
-                    received_audio = recvQ.get()
-                    print(f"Received audio chunk: {len(received_audio)} bytes")
-                time.sleep(0.01)
-
+                    speaker.play_bytes(received_audio)
         except KeyboardInterrupt:
             print("\nClient shutting down...")
+        finally:
+            mic.close()
+            speaker.stop()
             client.close_client()
-
     else:
         print("Invalid mode. Use 'server' or 'client'")
         sys.exit(1)
