@@ -3,20 +3,22 @@ import threading
 import queue
 import pickle
 import time
+import cv2
+import numpy as np
 from Common.Cipher import AESCipher
 
-class VideoComm:
 
-    def __init__(self, port, key_string, msgQ=None, users={}):
+class VideoComm:
+    def __init__(self, port, key_string, users=None):
         """
-        Create comm objects queues and starts _receive_frames
+        Create comm objects, queues and start receiving frames
         """
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_socket.bind(("0.0.0.0", port))
         self.AES = AESCipher(key_string)
         self.frameQ = queue.Queue()
-        self.users = users
-        self.MAX_SIZE = 65507
+        self.users = users if users else []
+        self.MAX_SIZE = 65507  # max UDP packet size
         self.running = True
         threading.Thread(target=self._receive_frames, daemon=True).start()
 
@@ -31,15 +33,13 @@ class VideoComm:
                 frame = pickle.loads(decrypted_data)
                 self.frameQ.put((frame, addr))
             except OSError:
-                # happens when socket closes
-                break
-
+                break  # happens when socket closes
             except Exception as e:
                 print("Receive error:", e)
 
     def send_frame(self, frame):
         """
-        Send frame to all users
+        Send frame (numpy array) to all users
         """
         try:
             raw_data = pickle.dumps(frame)
@@ -54,7 +54,6 @@ class VideoComm:
         Add user to broadcast list
         """
         if (user_ip, user_port) not in self.users:
-            self.users[user_ip] =
             self.users.append((user_ip, user_port))
 
     def remove_user(self, user_ip, user_port):
@@ -71,50 +70,56 @@ class VideoComm:
         self.running = False
         try:
             self.udp_socket.shutdown(socket.SHUT_RDWR)
-        except Exception as e:
-            print("Close error:", e)
+        except Exception:
+            pass
         self.udp_socket.close()
 
 
+# ----------------- Example Usage -----------------
 def main():
     key = "testkey123"
 
-    # create two endpoints
+    # Video comm setup
     server = VideoComm(5000, key, users=[])
     client = VideoComm(5001, key, users=[])
 
-    # connect them
+    # Connect them
     server.add_user("127.0.0.1", 5001)
     client.add_user("127.0.0.1", 5000)
 
-    print("Users connected")
+    print("Users connected. Press 'q' to quit.")
 
-    # send frame from server
-    frame1 = {"frame_id": 1, "data": "Hello frame"}
-    print("Sending frame from server...")
-    server.send_frame(frame1)
+    # Open local camera for server
+    cap = cv2.VideoCapture(0)  # camera 0
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
-    time.sleep(1)
+    try:
+        while True:
+            # --- Capture and send frame ---
+            ret, frame = cap.read()
+            if not ret:
+                continue
 
-    if not client.frameQ.empty():
-        frame, addr = client.frameQ.get()
-        print("Client received frame:", frame)
-        print("From:", addr)
-    else:
-        print("Client did not receive frame")
-    # send frame from client
-    frame2 = {"frame_id": 2, "data": "Reply frame"}
-    print("Sending frame from client...")
-    client.send_frame(frame2)
-    time.sleep(1)
-    if not server.frameQ.empty():
-        frame, addr = server.frameQ.get()
-        print("Server received frame:", frame)
-        print("From:", addr)
-    else:
-        print("Server did not receive frame")
-    server.close()
-    client.close()
+            server.send_frame(frame)
+
+            # --- Display received frames from client ---
+            while not server.frameQ.empty():
+                recv_frame, addr = server.frameQ.get()
+                cv2.imshow(f"Received from {addr}", recv_frame)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+            time.sleep(0.02)  # small delay to reduce CPU usage
+
+    except KeyboardInterrupt:
+        print("Shutting down...")
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        server.close()
+        client.close()
 
 
 if __name__ == "__main__":

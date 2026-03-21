@@ -291,7 +291,12 @@ if __name__ == "__main__":
         audioQ = queue.Queue()
         server = AudioServer(1234, audioQ)
 
-        # Wait for audio chunks and print info
+        # 🔊 NEW: create local speaker output
+        from Client.Devices.AudioOutputDevice import AudioOutput
+
+        speaker = AudioOutput(rate=16000, channels=1)  # match mic settings
+
+        # Wait for audio chunks, play and broadcast
         print("Server running. Waiting for clients and audio chunks...")
         try:
             while True:
@@ -299,14 +304,20 @@ if __name__ == "__main__":
                     ip, audio_chunk = audioQ.get()
                     print(f"Received audio from {ip}: {len(audio_chunk)} bytes")
 
+                    # 🔊 Play the audio locally on server
+                    speaker.play_bytes(audio_chunk)
+
                     # Broadcast to other clients with timestamp
                     timestamp = int(time.time() * 1000)
                     server.broadcast_audio(audio_chunk, ip, timestamp)
                     print(f"Broadcasted audio to other clients (timestamp: {timestamp})")
+
                 time.sleep(0.01)
+
         except KeyboardInterrupt:
             print("\nServer shutting down...")
-
+        finally:
+            speaker.stop()
 
     elif mode == "client":
         print("Starting audio client, connecting to 127.0.0.1:1234...")
