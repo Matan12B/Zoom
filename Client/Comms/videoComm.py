@@ -49,7 +49,7 @@ class VideoComm:
         """
         try:
             # Compress frame as JPEG
-            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 15])
             if not ret:
                 return
             frame_bytes = buffer.tobytes()
@@ -91,14 +91,13 @@ class VideoComm:
         self.udp_socket.close()
 
 
-# ---------------- Example Usage -----------------
 def main():
     key = "testkey123"
     port = 5000
 
     # Get remote IP from user
-    remote_ip = input("Enter remote machine IP (or press Enter to skip): ").strip()
-
+    # remote_ip = input("Enter remote machine IP (or press Enter to skip): ").strip()
+    remote_ip = "10.0.0.5"
     # Create video comm
     video_comm = VideoComm(port, key, users=[])
 
@@ -118,13 +117,10 @@ def main():
 
     try:
         while True:
-            # --- Capture and send frame ---
             ret, frame = cap.read()
             if ret:
                 video_comm.send_frame(frame)
                 cv2.imshow("My Camera", frame)
-
-            # --- Display received frames ---
             while not video_comm.frameQ.empty():
                 recv_frame, addr = video_comm.frameQ.get()
                 cv2.imshow(f"Received from {addr}", recv_frame)

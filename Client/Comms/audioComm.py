@@ -320,9 +320,9 @@ if __name__ == "__main__":
             speaker.stop()
 
     elif mode == "client":
-        print("Starting audio client, connecting to 127.0.0.1:1234...")
+        print("Starting audio client, connecting to :1234...")
         recvQ = queue.Queue()
-        client = AudioClient("10.0.0.26", 1234, recvQ)
+        client = AudioClient("10.0.0.5", 1234, recvQ)
         # 🔊 NEW: import your audio classes
 
         mic = Microphone(volume=70, rate=16000, channels=1, chunk=1024)
