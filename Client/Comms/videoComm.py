@@ -117,7 +117,8 @@ def main():
     # Initialize CameraControl to handle camera
     cam = CameraControl(width=160, height=120)
     cam.start()
-
+    recv_frame = None
+    addr = None
     try:
         while True:
             # Get the latest frame from the CameraControl
@@ -138,8 +139,9 @@ def main():
             # Display received frames from other users
             while not video_comm.frameQ.empty():
                 recv_frame, addr = video_comm.frameQ.get()
-                if recv_frame is not None:
-                    cv2.imshow(f"Received from {addr}", recv_frame)
+
+            if recv_frame is not None:
+                cv2.imshow(f"Received from {addr}", recv_frame)
 
             # Exit condition
             if cv2.waitKey(1) & 0xFF == ord('q'):
