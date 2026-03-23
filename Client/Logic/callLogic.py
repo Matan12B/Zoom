@@ -1,52 +1,52 @@
-
-import queue
 import threading
 import time
 import socket
-import sys
-import os
-import cv2
-
-# my imports
+import queue
+from MatMeet.Client.Devices.Camera import CameraControl
+from MatMeet.Client.Devices.Microphone import Microphone
+from MatMeet.Client.Devices.AudioOutputDevice import AudioOutput
+from MatMeet.Client.GUI.VideoDisplay import VideoDisplay
 from MatMeet.Client.Comms.videoComm import VideoComm
 from MatMeet.Client.Comms.audioComm import AudioClient
-from MatMeet.Client.GUI.VideoDisplay import VideoDisplay
-from MatMeet.Client.Devices.Camera import CameraControl
-from MatMeet.Client.Devices.AudioOutputDevice import AudioOutput
-from MatMeet.Client.Devices.Microphone import Microphone
 from MatMeet.Client.Protocol import clientProtocol
 
 class CallLogic:
-    # todo video port audio port
+    """
+    Guest call logic: handles camera/mic, video/audio comm, and sync_buffer.
+    Behaves like Host in-meeting, minus host privileges.
+    """
+
     def __init__(self, port, key, comm, audio_server_ip):
         self.open_clients = {}
-        self.soc = socket.socket()
         self.msgQ = queue.Queue()
         self.display = VideoDisplay()
         self.call_comm = comm
         self.audio_comm = AudioClient(audio_server_ip, port)
         self.video_comm = VideoComm(port, key, self.open_clients)
+
+        # Current user IP
         hostname = socket.gethostname()
         self.ip = socket.gethostbyname(hostname)
+
+        # Command mapping
         self.commands = {
-            "hv" : self.handle_video,
-            "ha" : self.handle_audio,
-            "hj" : self.handle_join,
-            "hd" : self.handle_disconnect
+            "hv": self.handle_video,
+            "ha": self.handle_audio,
+            "hj": self.handle_join,
+            "hd": self.handle_disconnect
         }
-        self.camera = CameraControl()
+
+        # Devices
+        self.camera = CameraControl(width=478, height=359)  # Resize in CameraControl
         self.mic = Microphone(50)
         self.AudioOutput = AudioOutput()
+
+        # Buffers for received audio/video
         self.sync_buffer = {}
+        self.running = True
 
     def start(self):
-        """
-        Main call loop:
-        - Start devices
-        - Start communication
-        - Send audio & video continuously
-        """
-
+        """Main loop: start devices, handle communication, send audio/video."""
         print("Starting call...")
 
         # Start devices
@@ -54,130 +54,116 @@ class CallLogic:
         self.mic.start()
         self.mic.unmute()
 
-        # Start communication threads (assuming they have start() method)
-        threading.Thread(target=self.handle_msgs,
-        args=(self.call_comm, self.msgQ, "CALL"),
+        # Start message handling thread
+        threading.Thread(
+            target=self.handle_msgs,
             daemon=True
         ).start()
-        threading.Thread(target=self.playback_loop, daemon=True).start()
 
-        # TODO GUI
+        # Start playback thread
+        # threading.Thread(target=self.playback_loop, daemon=True).start()
+
         try:
-            while True:
+            while self.running:
+                # Send latest camera frame
                 frame = self.camera.get_frame()
-                if frame:
+                if frame is not None:
                     self.send_video(self.ip, frame)
-                audio_chunk = self.mic.record()
-                if audio_chunk:
-                    self.send_audio(self.ip, audio_chunk)
 
-                # Small sleep prevents CPU overuse
-                time.sleep(0.01)
+                # Send microphone audio
+                # audio_chunk = self.mic.record()
+                # if audio_chunk:
+                #     self.send_audio(self.ip, audio_chunk)
+
+                time.sleep(0.01)  # prevent CPU overuse
 
         except KeyboardInterrupt:
             print("Call interrupted.")
 
         finally:
-            print("Closing call...")
-            self.camera.stop()
-            self.mic.stop()
-            self.mic.close()
+            self.cleanup()
 
-    def playback_loop(self):
-        """
-        plays audio and video in sync from the buffer and than deletes them
-        """
+    def cleanup(self):
+        """Stop devices and clean resources."""
+        print("Closing call...")
+        self.camera.stop()
+        self.mic.stop()
+        self.mic.close()
+
+    # -------------------
+    # Communication
+    # -------------------
+
+    def handle_msgs(self):
+        """Process incoming messages from the server."""
         while True:
-            for client in list(self.sync_buffer.keys()):
-                timestamps = list(self.sync_buffer[client].keys())
-
-                for timestamp in timestamps:
-                    data = self.sync_buffer[client][timestamp]
-
-                    if data["audio"] and data["video"]:
-                        frame = data["video"]
-                        audio = data["audio"]
-
-                        # display video
-                        self.display.show_frame(client, frame)
-
-                        # play audio
-                        self.AudioOutput.play(audio)
-
-                        del self.sync_buffer[client][timestamp]
-
-            time.sleep(0.01)
-
-    def handle_msgs(self, comm, recvQ, state):
-        """
-        Handle incoming messages from the server.
-        :param comm: Client communication object
-        :param recvQ: Queue to receive messages
-        :return: None
-        """
-        while True:
-            msg = recvQ.get()
+            msg = self.msgQ.get()
             opcode, data = clientProtocol.unpack(msg)
-            if opcode in self.commands.keys():
-                self.commands[opcode](comm, data, state)
+            if opcode in self.commands:
+                self.commands[opcode](data)
 
-    # Send video to a specific client
     def send_video(self, username, img):
-        success, encoded = cv2.imencode(".jpg", img)
-        if success:
-            self.video_comm.send_frame(encoded.tobytes())
+        """Send a frame to video communication system (CameraControl handles resizing)."""
+        if img is not None:
+            self.video_comm.send_frame(img)
 
     def send_audio(self, username, audio):
+        """Send audio chunk to all clients."""
         self.audio_comm.send_audio(audio)
 
+    # -------------------
+    # Playback
+    # -------------------
+
+    # def playback_loop(self):
+    #     """Play audio and video from the sync_buffer."""
+    #     while True:
+    #         for client in list(self.sync_buffer.keys()):
+    #             timestamps = list(self.sync_buffer[client].keys())
+    #             for timestamp in timestamps:
+    #                 data = self.sync_buffer[client][timestamp]
+    #                 if data["audio"] and data["video"]:
+    #                     # Display video
+    #                     self.display.show_frame(client, data["video"])
+    #                     # Play audio
+    #                     self.AudioOutput.play(data["audio"])
+    #                     # Remove after playback
+    #                     del self.sync_buffer[client][timestamp]
+    #
+    #         time.sleep(0.01)
+
+    # -------------------
+    # Handlers
+    # -------------------
+
+    def handle_video(self, client_ip, username, timestamp, img):
+        """Store received video frame in sync_buffer."""
+        if client_ip not in self.sync_buffer:
+            self.sync_buffer[client_ip] = {}
+        if timestamp not in self.sync_buffer[client_ip]:
+            self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
+        self.sync_buffer[client_ip][timestamp]["video"] = img
+
     def handle_audio(self, client_ip, username, timestamp, audio):
-        """
-        add audio to buffer
-        """
-        if not hasattr(self, 'sync_buffer'):
-            self.sync_buffer = {}
+        """Store received audio chunk in sync_buffer."""
         if client_ip not in self.sync_buffer:
             self.sync_buffer[client_ip] = {}
         if timestamp not in self.sync_buffer[client_ip]:
             self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
         self.sync_buffer[client_ip][timestamp]["audio"] = audio
 
-    def handle_video(self, client_ip, username, timestamp, img):
-        """
-        add video to buffer
-        """
-        key = f"{client_ip}"
+    def handle_join(self, comm, data, state):
+        """Handle a new participant joining (update open_clients)."""
+        ip, username = data.get("ip"), data.get("username")
+        self.open_clients[ip] = username
 
-        if not hasattr(self, 'sync_buffer'):
-            self.sync_buffer = {}
-
-        if key not in self.sync_buffer:
-            self.sync_buffer[key] = {}
-
-        if timestamp not in self.sync_buffer[key]:
-            self.sync_buffer[key][timestamp] = {"audio": None, "video": None}
-
-        self.sync_buffer[key][timestamp]["video"] = img
-
-    def handle_disconnect(self, ip, username):
-        print(username, "left the call")
-        self.display.remove_user(ip, username)
+    def handle_disconnect(self, comm, data, state):
+        """Handle a participant leaving the call."""
+        ip, username = data.get("ip"), data.get("username")
         if ip in self.open_clients:
             del self.open_clients[ip]
-
-    # Connect the client
-    def handle_join(self, ip, port, username, key, state, video_port, audio_port):
-        pass  # Connect the client
+        self.display.remove_user(ip, username)
 
     def leave_call(self):
-        pass
-
-    def handle_kick(comm, recvQ):
-        """
-        Close all connections because client was kicked
-        """
-
-    if __name__ == "__main__":
-        callLogic = CallLogic()
-        callLogic.call()
-
+        self.running = False
+        self.cleanup()

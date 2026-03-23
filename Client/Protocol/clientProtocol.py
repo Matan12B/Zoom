@@ -22,10 +22,11 @@ def build_register(username,password):
     Return a register msg build in the protocol structure
     """
 
-def build_enter_meeting(call_id):
+def build_enter_meeting(meeting_code):
     """
     Return a request to enter meeting msg build in the protocol structure
     """
+    return f"jm^#^{meeting_code}"
 
 def build_force_close_camera():
     """

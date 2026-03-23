@@ -51,6 +51,7 @@ class HomeFrame(wx.Frame):
             return
 
         # Request to join meeting
+        # todo if isinstance(client, callLogic)
         self.client.request_join_meeting(code)
 
         # Wait briefly for server response
