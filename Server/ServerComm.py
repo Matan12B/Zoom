@@ -2,7 +2,7 @@ import socket
 import threading
 import queue
 import select
-from MatMeet.Common.Cipher import DiffiHelman, AESCipher
+from Common.Cipher import DiffiHelman, AESCipher
 
 class ServerComm:
     def __init__(self, port, recvQ):

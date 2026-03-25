@@ -4,9 +4,9 @@ import queue
 import sys
 import time
 
-from MatMeet.Client.Protocol import clientProtocol
+from Client.Protocol import clientProtocol
 
-from MatMeet.Common.Cipher import DiffiHelman, AESCipher
+from Common.Cipher import DiffiHelman, AESCipher
 
 
 import os

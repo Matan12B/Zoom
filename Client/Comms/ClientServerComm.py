@@ -2,7 +2,7 @@ import socket
 import threading
 import queue
 import select
-from MatMeet.Common.Cipher import DiffiHelman, AESCipher
+from Common.Cipher import DiffiHelman, AESCipher
 # todo check if main server can do this!!
 class ClientServer:
 

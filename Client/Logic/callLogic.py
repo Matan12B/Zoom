@@ -3,14 +3,14 @@ import time
 import socket
 import queue
 import cv2
-from MatMeet.Client.Devices.Camera import CameraControl
-from MatMeet.Client.Devices.Microphone import Microphone
-from MatMeet.Client.Devices.AudioOutputDevice import AudioOutput
-from MatMeet.Client.GUI.VideoDisplay import VideoDisplay
-from MatMeet.Client.Comms.videoComm import VideoComm
-from MatMeet.Client.Comms.audioComm import AudioClient
-from MatMeet.Client.Protocol import clientProtocol
-from MatMeet.Common.Cipher import AESCipher
+from Client.Devices.Camera import CameraControl
+from Client.Devices.Microphone import Microphone
+from Client.Devices.AudioOutputDevice import AudioOutput
+from Client.GUI.VideoDisplay import VideoDisplay
+from Client.Comms.videoComm import VideoComm
+from Client.Comms.audioComm import AudioClient
+from Client.Protocol import clientProtocol
+from Common.Cipher import AESCipher
 
 class CallLogic:
     """

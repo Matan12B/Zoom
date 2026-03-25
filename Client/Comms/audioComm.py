@@ -1,12 +1,12 @@
-from MatMeet.Client.Devices.Microphone import Microphone
-from MatMeet.Client.Devices.AudioOutputDevice import AudioOutput
+from Client.Devices.Microphone import Microphone
+from Client.Devices.AudioOutputDevice import AudioOutput
 import socket
 import threading
 import queue
 import sys
 import time
-from MatMeet.Client.Protocol import clientProtocol
-from MatMeet.Common.Cipher import DiffiHelman, AESCipher
+from Client.Protocol import clientProtocol
+from Common.Cipher import DiffiHelman, AESCipher
 import os
 import select
 

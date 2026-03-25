@@ -1,9 +1,9 @@
 import threading
 import queue
 import time
-from MatMeet.Server.DB import DB
-from MatMeet.Server.ServerComm import ServerComm
-from MatMeet.Server import serverProtocol
+from Server.DB import DB
+from Server.ServerComm import ServerComm
+from Server import serverProtocol
 from random import choice
 from string import ascii_uppercase
 import random

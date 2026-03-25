@@ -1,11 +1,11 @@
 import queue
 import threading
 import time
-from MatMeet.Client.Comms.ClientComm import ClientComm
-from MatMeet.Client.Protocol import clientProtocol
-from MatMeet.Client.Logic.Host import Host
-from MatMeet.Client.Logic.callLogic import CallLogic
-from MatMeet.Server.ServerComm import ServerComm
+from Client.Comms.ClientComm import ClientComm
+from Client.Protocol import clientProtocol
+from Client.Logic.Host import Host
+from Client.Logic.callLogic import CallLogic
+from Server.ServerComm import ServerComm
 
 
 class Client:

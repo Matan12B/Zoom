@@ -5,15 +5,15 @@ import sys
 import os
 import cv2
 import queue
-from MatMeet.Client.Devices.Camera      import CameraControl
-from MatMeet.Client.Devices.Microphone  import Microphone
-from MatMeet.Client.Comms.videoComm     import VideoComm
-from MatMeet.Client.Comms.audioComm     import AudioServer
-from MatMeet.Client.GUI.VideoDisplay    import VideoDisplay
-from MatMeet.Client.Protocol            import clientProtocol
+from Client.Devices.Camera      import CameraControl
+from Client.Devices.Microphone  import Microphone
+from Client.Comms.videoComm     import VideoComm
+from Client.Comms.audioComm     import AudioServer
+from Client.GUI.VideoDisplay    import VideoDisplay
+from Client.Protocol            import clientProtocol
 # TODO note this is a problem!
-from MatMeet.Client.Comms.ClientServerComm import ClientServer
-from MatMeet.Common.Cipher import AESCipher
+from Client.Comms.ClientServerComm import ClientServer
+from Common.Cipher import AESCipher
 
 
 # current problems:
@@ -28,7 +28,6 @@ class Host:
         self.msgQ = queue.Queue()
         self.display = VideoDisplay()
         self.host_comm = comm
-        print("port", port)
         self.host_server = ClientServer(port, self.msgQ, self.open_clients)
         # todo add port to audio and video comm
         self.audio_comm = AudioServer(port, meeting_key, self.host_comm.open_clients)
@@ -36,6 +35,7 @@ class Host:
         # for getting the current user ip
         hostname = socket.gethostname()
         self.ip = socket.gethostbyname(hostname)
+
         self.commands = {
             "hv" : self.handle_video,
             "ha" : self.handle_audio,
