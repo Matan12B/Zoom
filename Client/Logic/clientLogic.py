@@ -21,6 +21,8 @@ class Client:
         self.password = ""
         self.meeting_code = None
         self.active = None
+        self.handle_msgs_running = False
+
         self.commands = {
             "sm" : self.start_meeting,
             "rjm": self.request_join_meeting,
@@ -40,6 +42,7 @@ class Client:
             target=self.handle_msgs,
             daemon=True
         ).start()
+        self.handle_msgs_running = True
 
     def start_meeting(self):
         """
@@ -95,12 +98,13 @@ class Client:
             self.role = CallLogic(port, meeting_key, self.comm, host_ip)
         else:
             print("Invalid role")
+        self.handle_msgs_running = False
 
     def handle_msgs(self):
         """
         Handle incoming messages from server
         """
-        while True:
+        while self.handle_msgs_running:
             msg = self.msgsQ.get()
             print(f"Received message: {msg}")
             opcode, data = clientProtocol.unpack(msg)

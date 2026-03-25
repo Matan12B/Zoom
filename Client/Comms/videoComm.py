@@ -54,18 +54,8 @@ class VideoComm:
         if not frame_bytes:
             return
         encrypted = self.AES.encrypt_file(frame_bytes)
-        for ip, data in self.open_clients.items():
-            # Determine port depending on structure
-            if isinstance(data, int):  # Guest
-                port = data
-            elif isinstance(data, (list, tuple)) and len(data) >= 2:  # Host
-                port = data[1]
-            else:
-                print(f"Unknown client data structure for {ip}: {data}")
-                continue
-
-            print(f"Sending {len(encrypted)} bytes to {ip}:{port}")
-            self.udp_socket.sendto(encrypted, (ip, port))
+        for ip in self.open_clients:
+            self.udp_socket.sendto(encrypted, (ip, self.port))
 
     def add_user(self, user_ip, user_port):
         """
