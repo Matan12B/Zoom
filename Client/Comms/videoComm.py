@@ -45,7 +45,7 @@ class VideoComm:
             except Exception as e:
                 print("Receive error:", e)
 
-    def send_video(self, frame_bytes):
+    def send_frame(self, frame_bytes):
         """
         Send a pre-encoded JPEG frame to all open_clients.
         :param frame_bytes: JPEG bytes (already resized and encoded)
