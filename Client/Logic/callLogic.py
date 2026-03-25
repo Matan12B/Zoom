@@ -2,7 +2,6 @@ import threading
 import time
 import socket
 import queue
-import cv2
 from Client.Devices.Camera import CameraControl
 from Client.Devices.Microphone import Microphone
 from Client.Devices.AudioOutputDevice import AudioOutput
@@ -12,54 +11,66 @@ from Client.Comms.audioComm import AudioClient
 from Client.Protocol import clientProtocol
 from Common.Cipher import AESCipher
 
+
 class CallLogic:
     """
-    Guest call logic for MatMeet:
-    - Sends video P2P to other guests via VideoComm
-    - Sends audio through host via AudioClient
-    - Receives video and audio, stores in sync_buffer
+    Guest call logic (LAN P2P) rewritten in Host-style:
+    - Sends video via VideoComm
+    - Sends/receives audio via AudioClient
+    - Uses sync_buffer for GUI
     """
 
-    def __init__(self, port, key, comm, audio_server_ip):
-        self.open_clients = {}  # {ip: [AESCipher, port]}
+    def __init__(self, port, meeting_key, comm, host_ip):
+        self.open_clients = {}  # {ip: port}
         self.msgQ = queue.Queue()
         self.display = VideoDisplay()
         self.call_comm = comm
-        self.AES = AESCipher(key)
-        # self.audio_comm = AudioClient(audio_server_ip, self.AES)
-        self.video_comm = VideoComm(self.AES , self.open_clients)
-        # hostname = socket.gethostname()
-        # self.ip = socket.gethostbyname(hostname)
+        self.AES = AESCipher(meeting_key)  # single AES key for meeting
+
+        # Comm systems
+        self.video_comm = VideoComm(self.AES, self.open_clients)
+        self.audio_comm = AudioClient(host_ip, self.AES)
+
+        # Local devices
+        self.camera = CameraControl(width=478, height=359)
+        self.mic = Microphone(50)
+        self.AudioOutput = AudioOutput()  # for playback
+        self.sync_buffer = {}
+
+        # Guest IP (LAN)
+        # self.ip = socket.gethostbyname(socket.gethostname())
         self.ip = "10.0.0.5"
+        # Command handlers
         self.commands = {
             "hv": self.handle_video,
             "ha": self.handle_audio,
             "hj": self.handle_join,
             "hd": self.handle_disconnect
         }
-        self.camera = CameraControl(width=478, height=359)
-        self.mic = Microphone(50)
-        self.AudioOutput = AudioOutput()
-        self.sync_buffer = {}
+
         self.running = True
 
     def start(self):
-        """Start the call: devices, threads, sending loops"""
-        print("Starting call...")
+        """Start devices, threads, and send loops (like Host)"""
+        print("Starting guest call...")
+
         # Start devices
         self.camera.start()
         self.mic.start()
         self.mic.unmute()
+
+        # Start threads
         threading.Thread(target=self.handle_msgs, daemon=True).start()
         threading.Thread(target=self.receive_video_loop, daemon=True).start()
+
         try:
             while self.running:
-                # Send own camera frame
+                # Capture and send own video
                 frame_bytes = self.camera.get_frame()
                 if frame_bytes is not None:
                     self.video_comm.send_frame(frame_bytes)
 
-                # Send own audio chunk through host
+                # Capture and send own audio
                 # audio_chunk = self.mic.record()
                 # if audio_chunk:
                 #     timestamp = time.time()
@@ -73,27 +84,27 @@ class CallLogic:
             self.cleanup()
 
     def cleanup(self):
-        """Stop devices and mark call as finished"""
-        print("Closing call...")
+        """Stop devices and communication"""
+        print("Closing guest call...")
         self.running = False
-        if hasattr(self, 'camera'):
+        if hasattr(self, "camera"):
             self.camera.stop()
-        if hasattr(self, 'mic'):
+        if hasattr(self, "mic"):
             self.mic.stop()
             self.mic.close()
-        if hasattr(self, 'video_comm'):
+        if hasattr(self, "video_comm"):
             self.video_comm.close()
 
     def handle_msgs(self):
-        """Process incoming messages from host/peers"""
+        """Threaded message handler"""
         while self.running:
             msg = self.msgQ.get()
             opcode, data = clientProtocol.unpack(msg)
             if opcode in self.commands:
-                self.commands[opcode](*data)  # Important: unpack data list
+                self.commands[opcode](*data)
 
     def receive_video_loop(self):
-        """Bridge incoming P2P frames into sync_buffer for GUI"""
+        """Receive incoming frames from peers into sync_buffer"""
         while self.running:
             while not self.video_comm.frameQ.empty():
                 frame, addr = self.video_comm.frameQ.get()
@@ -102,54 +113,40 @@ class CallLogic:
 
                 if client_ip not in self.sync_buffer:
                     self.sync_buffer[client_ip] = {}
-
                 if timestamp not in self.sync_buffer[client_ip]:
-                    self.sync_buffer[client_ip][timestamp] = {
-                        "audio": None,
-                        "video": None
-                    }
+                    self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
 
                 self.sync_buffer[client_ip][timestamp]["video"] = frame
 
             time.sleep(0.005)
 
-    def send_video(self, username, frame_bytes):
-        """Send own video frame to peers"""
-        if frame_bytes is not None:
-            self.video_comm.send_frame(frame_bytes)
-
-    def send_audio(self, username, audio, timestamp):
-        """Send audio through host"""
-        self.audio_comm.send_audio(audio)
-
-    def handle_video(self, client_ip, username, timestamp, img):
-        """Store received video frame in sync_buffer"""
+    # === Command Handlers ===
+    def handle_video(self, client_ip, username, timestamp, frame):
         if client_ip not in self.sync_buffer:
             self.sync_buffer[client_ip] = {}
         if timestamp not in self.sync_buffer[client_ip]:
             self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
-        self.sync_buffer[client_ip][timestamp]["video"] = img
+        self.sync_buffer[client_ip][timestamp]["video"] = frame
 
     def handle_audio(self, client_ip, username, timestamp, audio):
-        """Store received audio chunk in sync_buffer"""
         if client_ip not in self.sync_buffer:
             self.sync_buffer[client_ip] = {}
         if timestamp not in self.sync_buffer[client_ip]:
             self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
         self.sync_buffer[client_ip][timestamp]["audio"] = audio
 
-    def handle_join(self, ip, port, shared_key):
-        """A new peer joined the call: store info and connect via VideoComm"""
+    def handle_join(self, ip, port):
+        """New peer joined (store port and add to VideoComm)"""
         print(f"{ip} joined the call")
+        self.open_clients[ip] = port
         self.video_comm.add_user(ip, port)
-        self.open_clients[ip] = [AESCipher(shared_key), port]
 
     def handle_disconnect(self, ip, username):
-        """A peer left the call"""
+        """Peer left the call"""
         print(f"{username} left the call")
         if ip in self.open_clients:
             del self.open_clients[ip]
-        self.video_comm.remove_user(ip, 0)  # port not needed for dict removal
+        self.video_comm.remove_user(ip, 0)
         if ip in self.sync_buffer:
             del self.sync_buffer[ip]
 

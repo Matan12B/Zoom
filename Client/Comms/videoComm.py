@@ -45,19 +45,27 @@ class VideoComm:
             except Exception as e:
                 print("Receive error:", e)
 
-    def send_frame(self, frame_bytes):
+    def send_video(self, frame_bytes):
         """
         Send a pre-encoded JPEG frame to all open_clients.
         :param frame_bytes: JPEG bytes (already resized and encoded)
         """
-        print("Sending frame...")
-        try:
-            encrypted = self.AES.encrypt_file(frame_bytes)
-            for ip, data in self.open_clients.items():
-                port = data[0]
-                self.udp_socket.sendto(encrypted, (ip, port))
-        except Exception as e:
-            print("Send error in video comm:", e)
+
+        if not frame_bytes:
+            return
+        encrypted = self.AES.encrypt_file(frame_bytes)
+        for ip, data in self.open_clients.items():
+            # Determine port depending on structure
+            if isinstance(data, int):  # Guest
+                port = data
+            elif isinstance(data, (list, tuple)) and len(data) >= 2:  # Host
+                port = data[1]
+            else:
+                print(f"Unknown client data structure for {ip}: {data}")
+                continue
+
+            print(f"Sending {len(encrypted)} bytes to {ip}:{port}")
+            self.udp_socket.sendto(encrypted, (ip, port))
 
     def add_user(self, user_ip, user_port):
         """
