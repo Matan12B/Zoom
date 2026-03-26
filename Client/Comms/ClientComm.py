@@ -13,12 +13,12 @@ import os
 
 # client
 class ClientComm:
-    def __init__(self, server_ip, port, recvQ):
+    def __init__(self, server_ip, port, recvQ, AES=None):
         self.my_socket = socket.socket()
         self.server_ip = server_ip
         self.port = port
         self.recvQ = recvQ
-        self.cipher = None
+        self.cipher = AES
         self.open = False
         self.open_clients= {}
         threading.Thread(target=self._mainLoop,).start()
@@ -52,15 +52,8 @@ class ClientComm:
                     continue
 
                 if decrypt_msg:
-                    if decrypt_msg.startswith("f"):
-                        _, data = clientProtocol.unpack(decrypt_msg)
-                        # data[0] = len, data[1] = id
-                        id = ""
-                        if len(data) > 1:
-                            id = data[1]
-                        self.receive_image(int(data[0]), id)
-                    else:
-                        self.recvQ.put(decrypt_msg)
+                    print("recvd msg from server")
+                    self.recvQ.put(decrypt_msg)
 
     def _close_client(self):
         """
@@ -132,49 +125,6 @@ class ClientComm:
                     self._close_client()
                     self.open = False
         return flag
-
-    def receive_image(self, file_len, id=""):
-        """
-        this function receive a picture from the user and
-        creates a new pic file with the same name
-
-        Param file_name: the path of the file created by the server
-
-        Type file_name: string
-        Type file_len: int
-
-        Return: create a pic file with the given name
-        Rtype: none
-        """
-        pic_data = bytearray()
-        while len(pic_data) < file_len:
-            slice = file_len - len(pic_data)
-            if slice > 1024:
-                try:
-                    pic_data.extend(self.my_socket.recv(1024))
-                except Exception as e:
-                    print(f"error in recv - {e}")
-                    break
-            else:
-                try:
-                    pic_data.extend(self.my_socket.recv(slice))
-                except Exception as e:
-                    print(f"error in recv - {e}")
-                    break
-        try:
-            decrypted_data = self.cipher.decrypt_bytes(pic_data)
-        except Exception as e:
-            print(f"Error decrypting file data: {e}")
-            return
-        directory = "client photos"
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        self.file_counter += 1
-        file_path = os.path.join(directory, f"photo{self.file_counter}.jpg")
-        with open(file_path, "wb") as f:
-            f.write(decrypted_data)
-        image_id = clientProtocol.build_msg('i', [file_path, id])
-        self.recvQ.put(image_id)
 
 if __name__ == "__main__":
     msgsQ = queue.Queue()

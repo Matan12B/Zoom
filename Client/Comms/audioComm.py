@@ -16,7 +16,7 @@ class AudioClient:
         self.my_socket = socket.socket()
         self.server_ip = server_ip
         self.port = 3000 # todo from settings
-        self.recvQ = queue.Queue()
+        self.audio_queue = queue.Queue()
         # todo check if we need to exchange keys or not
         # self.cipher = None
         self.cipher = AES
@@ -52,8 +52,15 @@ class AudioClient:
                     self._close_client()
                     continue
                 if decrypt_audio_chunk:
-                    self.recvQ.put(decrypt_audio_chunk)
-
+                    audio, header = clientProtocol.unpack_file(decrypt_audio_chunk)
+                    if len(header) == 3:
+                        opcode = header[0]
+                        timestamp = float(header[1])
+                        sender_ip = header[2]
+                        self.audio_queue.put((audio, timestamp, sender_ip))
+                    else:
+                        print("incorrect audio msg")
+                    
     def _close_client(self):
         """
         close the connection
@@ -180,7 +187,14 @@ class AudioServer:
                             self.close_client(current_ip)
                             continue
                         if decrypt_audio_chunk:
-                            self.audio_queue.put([current_ip, decrypt_audio_chunk])
+                            audio, header = clientProtocol.unpack_file(decrypt_audio_chunk)
+                            if len(header) == 3:
+                                opcode = header[0]
+                                timestamp = float(header[1])
+                                sender_ip = header[2]
+                                self.audio_queue.put((audio, timestamp, sender_ip))
+                            else:
+                                print("incorrect audio msg")
 
     def _exchange_key(self, client_soc, client_ip):
         """
@@ -223,7 +237,7 @@ class AudioServer:
         except Exception as e:
             print(f"Error closing client {client_ip}: {e}")
 
-    def broadcast_audio(self, audio_chunk, sender_ip, timestamp):
+    def broadcast_audio(self, audio_chunk, sender_ip):
         """
         send audio to all connected users except the sender
         :param audio: audio file
@@ -233,16 +247,15 @@ class AudioServer:
         """
         for ip in list(self.open_clients.keys()):
             if ip and not ip == sender_ip:
-                self.send_audio(ip, audio_chunk, timestamp)
+                self.send_audio(ip, audio_chunk)
 
-    def send_audio(self, client_ip, audio_chunk, timestamp):
+    def send_audio(self, client_ip, audio_chunk):
         """
-
+        send audio msg to ip
         """
         if client_ip in self.open_clients.keys():
             soc = self._find_socket_by_ip(client_ip)
-            audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk)
-            self._send_audio(soc, audio_msg)
+            self._send_audio(soc, audio_chunk)
 
     def _send_audio(self, client_soc, audio_msg):
         """
@@ -329,8 +342,8 @@ if __name__ == "__main__":
 
     elif mode == "client":
         print("Starting audio client, connecting to 127.0.0.1:1234...")
-        recvQ = queue.Queue()
-        client = AudioClient("10.0.0.26", 1234, recvQ)
+        audio_queue = queue.Queue()
+        client = AudioClient("10.0.0.26", 1234, audio_queue)
         # 🔊 NEW: import your audio classes
 
         mic = Microphone(volume=70, rate=16000, channels=1, chunk=1024)
@@ -349,8 +362,8 @@ if __name__ == "__main__":
                 audio_chunk = mic.record()
                 client.send_audio(audio_chunk)
                 # 🔊 RECEIVE + PLAy
-                while not recvQ.empty():
-                    received_audio = recvQ.get()
+                while not audio_queue.empty():
+                    received_audio = audio_queue.get()
                     speaker.play_bytes(received_audio)
         except KeyboardInterrupt:
             print("\nClient shutting down...")

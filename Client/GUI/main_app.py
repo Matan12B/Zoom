@@ -7,7 +7,7 @@ class ZoomApp(wx.App):
         # Pass None for client to run in UI-only mode
         # 10.0.0.26
         # ip = input("Enter server ip: ")
-        ip = "10.0.0.14"
+        ip = "192.168.4.74"
         self.client = Client(ip, 3018)
         frame = HomeFrame(client=self.client)
         frame.Show()

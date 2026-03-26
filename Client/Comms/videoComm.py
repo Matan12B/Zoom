@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from Common.Cipher import AESCipher
 from Client.Devices.Camera import CameraControl
-
+from Client.Protocol import clientProtocol
 
 class VideoComm:
     def __init__(self, AES, open_clients):
@@ -35,24 +35,27 @@ class VideoComm:
                 data, addr = self.udp_socket.recvfrom(self.MAX_PACKET_SIZE)
                 decrypted_data = self.AES.decrypt_file(data)
                 # Decode JPEG bytes back to NumPy array
-                np_arr = np.frombuffer(decrypted_data, np.uint8)
+                # header is opcode, timestamp
+                frame_data, header = clientProtocol.unpack_file(decrypted_data)
+                np_arr = np.frombuffer(frame_data, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                timestamp = float(header[1])
                 if frame is not None:
-                    self.frameQ.put((frame, addr))
+                    self.frameQ.put((frame, timestamp, addr))
             except OSError:
                 break  # Socket closed
             except Exception as e:
                 print("Receive error:", e)
 
-    def send_frame(self, frame_bytes):
+    def send_frame(self, frame_data):
         """
         Send a pre-encoded JPEG frame to all open_clients.
         :param frame_bytes: JPEG bytes (already resized and encoded)
         """
 
-        if not frame_bytes:
+        if not frame_data:
             return
-        encrypted = self.AES.encrypt_file(frame_bytes)
+        encrypted = self.AES.encrypt_file(frame_data)
         for ip in self.open_clients:
             self.udp_socket.sendto(encrypted, (ip, self.port))
 
