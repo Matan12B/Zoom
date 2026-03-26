@@ -22,24 +22,23 @@ class CallLogic:
 
     def __init__(self, port, meeting_key, comm, host_ip):
         self.open_clients = {}  # {ip: port}
-        self.msgQ = queue.Queue()
+        self.msgs_from_host = queue.Queue()
         self.display = VideoDisplay()
         self.comm_with_server = comm
         self.AES = AESCipher(meeting_key)  # single AES key for meeting
-        self.comm_with_host = ClientComm(host_ip, port, self.msgQ, self.AES)
+        self.comm_with_host = ClientComm(host_ip, port, self.msgs_from_host, self.AES)
         # Comm systems
         self.video_comm = VideoComm(self.AES, self.open_clients)
         self.audio_comm = AudioClient(host_ip, self.AES)
         self.open_clients[host_ip] = port
         # Local devices
-        self.camera = CameraControl(width=478, height=359, jpeg_quality=10)
+        self.camera = CameraControl(width=478, height=359, jpeg_quality=60)
         self.mic = Microphone(50)
         self.AudioOutput = AudioOutput()  # for playback
         self.sync_buffer = {}
         self.meeting_start_time = None
-        # Guest IP (LAN)
         # self.ip = socket.gethostbyname(socket.gethostname())
-        self.ip = "10.0.0.13"
+        self.ip = "192.168.4.73"
         # Command handlers
         self.commands = {
             "ha": self.handle_audio,
@@ -65,7 +64,6 @@ class CallLogic:
             time.sleep(0.01)
         threading.Thread(target=self.receive_video_loop, daemon=True).start()
         threading.Thread(target=self.receive_audio_loop, daemon=True).start()
-
         try:
             while self.running:
                 # Capture and send own video
@@ -75,15 +73,12 @@ class CallLogic:
                     if frame_bytes is not None :
                         frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
                         self.video_comm.send_frame(frame_data)
-
                     if self.mic.running:  # make sure mic is started
                         audio_chunk = self.mic.record()
                         if audio_chunk:
                             # Send audio using your updated protocol with sender IP
                             audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
                             self.audio_comm.send_audio(audio_msg)
-
-
                     time.sleep(0.001)
 
         except KeyboardInterrupt:
@@ -106,7 +101,7 @@ class CallLogic:
     # def handle_msgs(self):
     #     """Threaded message handler"""
     #     while self.running:
-    #         msg = self.msgQ.get()
+    #         msg = self.msgs_from_host.get()
     #         opcode, data = clientProtocol.unpack(msg)
     #         if opcode in self.commands:
     #             self.commands[opcode](*data)
@@ -127,7 +122,7 @@ class CallLogic:
         """
         print("started listening to host server")
         while self.running:
-            msg = self.msgQ.get()
+            msg = self.msgs_from_host.get()
             print(f"Received message: {msg}")
             opcode, data = clientProtocol.unpack(msg)
             if opcode in self.commands:
