@@ -24,11 +24,11 @@ class CallFrame(wx.Frame):
         self.video_grid = wx.GridSizer(2, 2, 5, 5)
         self.video_panels = []
 
-        camera_width, camera_height = 478, 359  # Frame size for 4:3 aspect ratio
+        self.camera_width, self.camera_height = 478, 359
 
         for i in range(4):
             bitmap = wx.StaticBitmap(panel)
-            bitmap.SetMinSize((camera_width, camera_height))
+            bitmap.SetMinSize((self.camera_width, self.camera_height))
             self.video_panels.append(bitmap)
             self.video_grid.Add(bitmap, 1, wx.EXPAND)
 
@@ -62,53 +62,79 @@ class CallFrame(wx.Frame):
         self.is_muted = False
         self.is_camera_off = False
 
-        # Store frames for display
-        self.client_frames = {}
-
-        # fps
+        # FPS control
         self.last_update = 0
         self.fps = 24
-        # Timer updates video
+
+        # Timer
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.update_frames)
-        self.timer.Start(int(1000/24))
+        self.timer.Start(int(1000 / self.fps))
+
+    # -----------------
+    # Frame Updates
+    # -----------------
 
     def update_frames(self, event):
-        # Display own camera frame
         now = time.time()
         if now - self.last_update < 1 / self.fps:
-            return  # skip this tick if too soon
+            return
         self.last_update = now
+
+        # -----------------
+        # Self camera
+        # -----------------
         if hasattr(self.call_logic, 'camera') and self.call_logic.camera:
             frame_bytes = self.call_logic.camera.get_frame()
             if frame_bytes is not None:
-                # Decode JPEG bytes into a NumPy array
-                frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
+                frame = cv2.imdecode(
+                    np.frombuffer(frame_bytes, np.uint8),
+                    cv2.IMREAD_COLOR
+                )
                 if frame is not None:
                     self._display_frame(0, frame)
+                else:
+                    self._display_black(0)
+            else:
+                self._display_black(0)
+        else:
+            self._display_black(0)
 
-        # Display frames from other participants
+        # -----------------
+        # Other participants
+        # -----------------
         if hasattr(self.call_logic, 'sync_buffer'):
             panel_idx = 1
+
             for client_ip, timestamps in list(self.call_logic.sync_buffer.items()):
                 if panel_idx >= 4:
                     break
+
+                frame_displayed = False
+
                 for timestamp in sorted(timestamps.keys(), reverse=True):
                     data = timestamps[timestamp]
+
                     if data.get("video") is not None:
-                        other_frame = data["video"]
-                        self._display_frame(panel_idx, other_frame)
-                        panel_idx += 1
+                        self._display_frame(panel_idx, data["video"])
+                        frame_displayed = True
                         break
 
+                if not frame_displayed:
+                    self._display_black(panel_idx)
+
+                panel_idx += 1
+
+    # -----------------
+    # Display helpers
+    # -----------------
+
     def _display_frame(self, panel_idx, frame):
-        """Helper to display a frame in a specific video panel"""
         if frame is None or panel_idx >= len(self.video_panels):
             return
 
         try:
-            # Resize frame to fit 478x359 display panel
-            frame_resized = cv2.resize(frame, (478, 359))
+            frame_resized = cv2.resize(frame, (self.camera_width, self.camera_height))
             rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
             h, w = rgb.shape[:2]
             bitmap = wx.Bitmap.FromBuffer(w, h, rgb)
@@ -116,8 +142,16 @@ class CallFrame(wx.Frame):
         except Exception as e:
             print("Display error:", e)
 
+    def _display_black(self, panel_idx):
+        """Display a black frame"""
+        black = np.zeros((self.camera_height, self.camera_width, 3), dtype=np.uint8)
+        self._display_frame(panel_idx, black)
+
+    # -----------------
+    # Controls
+    # -----------------
+
     def toggle_mic(self, event):
-        """Toggle microphone mute/unmute"""
         if hasattr(self.call_logic, 'mic'):
             if self.is_muted:
                 self.call_logic.mic.unmute()
@@ -129,7 +163,6 @@ class CallFrame(wx.Frame):
                 self.is_muted = True
 
     def toggle_camera(self, event):
-        """Toggle camera on/off"""
         if hasattr(self.call_logic, 'camera'):
             if self.is_camera_off:
                 self.call_logic.camera.start()
@@ -141,12 +174,11 @@ class CallFrame(wx.Frame):
                 self.is_camera_off = True
 
     def leave_call(self, event):
-        """Leave the call and cleanup"""
         self.timer.Stop()
 
-        # Stop devices
         if hasattr(self.call_logic, 'camera'):
             self.call_logic.camera.stop()
+
         if hasattr(self.call_logic, 'mic'):
             self.call_logic.mic.stop()
             self.call_logic.mic.close()
