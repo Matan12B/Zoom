@@ -157,9 +157,8 @@ class CallFrame(wx.Frame):
 
     def leave_call(self, event):
         self.timer.Stop()
-        if hasattr(self.call_logic, 'camera'):
-            self.call_logic.camera.stop(pause_only=False)
-        if hasattr(self.call_logic, 'mic'):
-            self.call_logic.mic.stop()
-            self.call_logic.mic.close()
-        self.Close()
+        for frame in wx.GetTopLevelWindows():
+            frame.Close()  # triggers EVT_CLOSE and destroys frames
+        # Exit wxPython main loop
+        wx.CallAfter(wx.GetApp().ExitMainLoop)
+        self.call_logic.close()

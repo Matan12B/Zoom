@@ -10,7 +10,7 @@ from Client.Comms.videoComm import VideoComm
 from Client.Comms.audioComm import AudioClient
 from Client.Protocol import clientProtocol
 from Common.Cipher import AESCipher
-
+from Client.Comms.ClientComm import ClientComm
 
 class CallLogic:
     """
@@ -24,9 +24,9 @@ class CallLogic:
         self.open_clients = {}  # {ip: port}
         self.msgQ = queue.Queue()
         self.display = VideoDisplay()
-        self.call_comm = comm
+        self.comm_with_server = comm
         self.AES = AESCipher(meeting_key)  # single AES key for meeting
-
+        self.comm_with_host = ClientComm(host_ip, port, self.msgQ, self.AES)
         # Comm systems
         self.video_comm = VideoComm(self.AES, self.open_clients)
         self.audio_comm = AudioClient(host_ip, self.AES)
@@ -36,16 +36,16 @@ class CallLogic:
         self.mic = Microphone(50)
         self.AudioOutput = AudioOutput()  # for playback
         self.sync_buffer = {}
-
+        self.meeting_start_time = None
         # Guest IP (LAN)
         # self.ip = socket.gethostbyname(socket.gethostname())
         self.ip = "10.0.0.13"
         # Command handlers
         self.commands = {
-            "hv": self.handle_video,
             "ha": self.handle_audio,
             "hj": self.handle_join,
-            "hd": self.handle_disconnect
+            "hd": self.handle_disconnect,
+            "gmst": self.get_meeting_start_time
         }
 
         self.running = True
@@ -62,21 +62,27 @@ class CallLogic:
         # Start threads
         # threading.Thread(target=self.handle_msgs, daemon=True).start()
         threading.Thread(target=self.receive_video_loop, daemon=True).start()
+        threading.Thread(target=self.receive_audio_loop, daemon=True).start()
 
         try:
             while self.running:
                 # Capture and send own video
-                frame_bytes = self.camera.get_frame()
-                if frame_bytes is not None:
-                    self.video_comm.send_frame(frame_bytes)
+                if self.meeting_start_time is not None:
+                    timestamp = time.time() - self.meeting_start_time
+                    frame_bytes = self.camera.get_frame()
+                    if frame_bytes is not None :
+                        frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
+                        self.video_comm.send_frame(frame_data)
 
-                # Capture and send own audio
-                # audio_chunk = self.mic.record()
-                # if audio_chunk:
-                #     timestamp = time.time()
-                #     self.audio_comm.send_audio(audio_chunk)
+                    if self.mic.running:  # make sure mic is started
+                        audio_chunk = self.mic.record()
+                        if audio_chunk:
+                            # Send audio using your updated protocol with sender IP
+                            audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
+                            self.audio_comm.send_audio(audio_msg, self.ip, timestamp)
 
-                time.sleep(0.001)
+
+                    time.sleep(0.001)
 
         except KeyboardInterrupt:
             print("Call interrupted.")
@@ -112,19 +118,49 @@ class CallLogic:
         """
         if opcode in self.commands:
             self.commands[opcode](data)
+    def handle_msgs_from_host(self):
+        """
+
+        """
+        while True:
+            msg = self.msgQ.get()
+            print(f"Received message: {msg}")
+            opcode, data = clientProtocol.unpack(msg)
+            if opcode in self.commands:
+                self.commands[opcode](data)
+
+    def get_meeting_start_time(self, data):
+        """
+        get meeting start time from host for time stamps
+        """
+        self.meeting_start_time = data
+        print("meeting start time:", self.meeting_start_time)
 
     def receive_video_loop(self):
         """Receive incoming frames from peers into sync_buffer"""
         while self.running:
             while not self.video_comm.frameQ.empty():
-                frame, addr = self.video_comm.frameQ.get()
+                frame, timestamp, addr = self.video_comm.frameQ.get()
                 client_ip = addr[0]
-                timestamp = time.time()
+                timestamp = timestamp - self.meeting_start_time
                 if client_ip not in self.sync_buffer:
                     self.sync_buffer[client_ip] = {}
                 if timestamp not in self.sync_buffer[client_ip]:
                     self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
                 self.sync_buffer[client_ip][timestamp]["video"] = frame
+            time.sleep(0.005)
+    
+    def receive_audio_loop(self):
+        while self.running:
+            while not self.audio_comm.audio_queue.empty():
+                audio_bytes, timestamp, sender_ip = self.audio_comm.audio_queue.get()
+                client_ip = sender_ip
+                timestamp -= self.meeting_start_time
+                if client_ip not in self.sync_buffer:
+                    self.sync_buffer[client_ip] = {}
+                if timestamp not in self.sync_buffer[client_ip]:
+                    self.sync_buffer[client_ip][timestamp] = {"video": None, "audio": None}
+                self.sync_buffer[client_ip][timestamp]["audio"] = audio_bytes
             time.sleep(0.005)
 
     # === Command Handlers ===

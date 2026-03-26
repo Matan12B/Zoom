@@ -3,16 +3,15 @@ import threading
 import queue
 import select
 from Common.Cipher import DiffiHelman, AESCipher
-# todo check if main server can do this!!
-class ClientServer:
 
-    def __init__(self, port, recvQ, open_clients):
+class ClientServer:
+    def __init__(self, port, recvQ, open_clients, meeting_AES):
         self.server_socket = socket.socket()
         self.port = port
         self.recvQ = recvQ
-        # ip: [soc, AES]
-        self.open_clients= open_clients
+        self.open_clients = open_clients
         # soc: ip
+        self.AES = meeting_AES
         self.open_clients_soc_ip = {}
         self.server_socket.bind(('0.0.0.0', self.port))
         self.server_socket.listen(4)
@@ -43,39 +42,13 @@ class ClientServer:
                             else:
                                 self.close_client(current_ip)
                             if current_ip and current_ip in self.open_clients and msg:
-                                decrypt_msg = self.open_clients[current_ip][1].decrypt(msg)
+                                decrypt_msg = self.AES.decrypt(msg)
                         except Exception as e:
                             print(f"error in receiving message - {e}")
                             self.close_client(current_ip)
                             continue
                         if decrypt_msg:
                             self.recvQ.put([current_ip, decrypt_msg])
-
-    def _exchange_key(self, client_soc, client_ip):
-        """
-        Exchange the Diffie-Hellman key with the client and establish a shared AES key.
-        :param client_soc: The client's socket.
-        :param client_ip: The client's IP address.
-        """
-        diffie = DiffiHelman()
-        shared_key = None
-        client_public_key = None
-        try:
-            self.server_socket.send(str(diffie.public_key).zfill(5).encode())
-            client_public_key = int(self.server_socket.recv(5).decode())
-        except Exception as e:
-            print(f"Error in sending/receiving public key: {e}")
-        if client_public_key:
-            shared_key = diffie.create_shared_key
-
-        if shared_key:
-            print(f"Shared key established with client {client_ip}: {shared_key}")
-            self.open_clients[client_ip] = [client_soc, AESCipher(shared_key)]
-            self.open_clients_soc_ip[client_soc] = client_ip
-        else:
-            print(f"Failed to establish shared key with {client_ip}")
-
-
 
     def close_client(self, client_ip):
         """Closes the client connection safely."""
@@ -135,7 +108,7 @@ class ClientServer:
         """
         if client_soc in self.open_clients_soc_ip.keys():
             client_ip = self._find_ip_by_socket(client_soc)
-            encrypted_msg = self.open_clients[client_ip][1].encrypt(msg)
+            encrypted_msg =self.AES.encrypt(msg)
             try:
                 client_soc.send(str(len(encrypted_msg)).zfill(10).encode())  # Send message length
                 client_soc.send(encrypted_msg)  # Send the encrypted message
@@ -151,4 +124,7 @@ class ClientServer:
 
 if __name__ == "__main__":
     msgsQ = queue.Queue()
-
+    # Create the server and client
+    myServer = ClientServer(1234, msgsQ)
+    print(msgsQ.get())
+    myServer.send_msg("127.0.0.1", "hello client")

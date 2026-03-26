@@ -13,12 +13,12 @@ import os
 
 # client
 class ClientComm:
-    def __init__(self, server_ip, port, recvQ):
+    def __init__(self, server_ip, port, recvQ, AES=None):
         self.my_socket = socket.socket()
         self.server_ip = server_ip
         self.port = port
         self.recvQ = recvQ
-        self.cipher = None
+        self.cipher = AES
         self.open = False
         self.open_clients= {}
         threading.Thread(target=self._mainLoop,).start()

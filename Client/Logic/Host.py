@@ -34,17 +34,16 @@ class Host:
         self.msgQ = queue.Queue()
         self.display = VideoDisplay()
         self.host_comm = comm
-       #  self.host_server = ClientServer(port, self.msgQ, self.open_clients)
-        # todo add port to audio and video comm
         self.AES = AESCipher(meeting_key)
-        # self.audio_comm = AudioServer(self.AES, self.open_clients)
+        self.host_server = ClientServer(port, self.msgQ, self.open_clients, self.AES)
+        # todo add port to audio and video comm
+        self.audio_comm = AudioServer(self.AES, self.open_clients)
         self.video_comm = VideoComm(self.AES, self.open_clients)
         # for getting the current user ip
         hostname = socket.gethostname()
         self.ip = socket.gethostbyname(hostname)
 
         self.commands = {
-            "hv" : self.handle_video,
             "ha" : self.handle_audio,
             "hj" : self.handle_join,
             "hd" : self.handle_disconnect
@@ -52,6 +51,7 @@ class Host:
         self.camera = CameraControl()
         self.mic = Microphone(50)
         self.sync_buffer = {}
+        self.meeting_start_time = None
         self.running = True
 
     def start(self):
@@ -69,35 +69,38 @@ class Host:
         self.mic.start()
         self.mic.unmute()
         threading.Thread(target=self.receive_video_loop, daemon=True).start()
+        threading.Thread(target=self.receive_audio_loop, daemon=True).start()
 
-        # Start communication threads (assuming they have start() method)
+        self.meeting_start_time = time.time()
         # threading.Thread(
         #     target=self.handle_msgs,
         #     daemon=True
         # ).start()
         # threading.Thread(target=self.playback_loop, daemon=True).start()
-        # TODO GUI
         # start meeting
         try:
-            while True:
-                frame = self.camera.get_frame()
-                if frame is not None:
-                    self.video_comm.send_frame(frame)
-                # if audio_chunk:
-                #     self.send_audio(self.ip, audio_chunk)
+            while self.running:
+                if self.meeting_start_time is not None:
+                    timestamp = time.time() - self.meeting_start_time
+                    frame = self.camera.get_frame()
+                    if frame is not None:
+                        frame_data = clientProtocol.build_video_msg(timestamp, frame)
+                        self.video_comm.send_frame(frame_data)
+                    if self.mic.running:
+                        audio_chunk = self.mic.record()
+                        if audio_chunk:
+                            audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
+                            self.audio_comm.broadcast_audio(audio_msg, self.ip)
 
                 # Small sleep prevents CPU overuse
-                time.sleep(0.01)
+                time.sleep(0.001)
 
         except KeyboardInterrupt:
             print("Call interrupted.")
 
         finally:
-            print("Closing call...")
-            self.camera.stop()
-            self.mic.stop()
-            self.mic.close()
-            self.running = False
+            self.close()
+
     # def handle_msgs(self):
     #     """
     #     Threaded method: Waits for messages from clients.
@@ -133,14 +136,27 @@ class Host:
         """Receive incoming frames from peers into sync_buffer"""
         while self.running:
             while not self.video_comm.frameQ.empty():
-                frame, addr = self.video_comm.frameQ.get()
+                frame, timestamp, addr = self.video_comm.frameQ.get()
                 client_ip = addr[0]
-                timestamp = time.time()
+                timestamp = timestamp - self.meeting_start_time
                 if client_ip not in self.sync_buffer:
                     self.sync_buffer[client_ip] = {}
                 if timestamp not in self.sync_buffer[client_ip]:
                     self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
                 self.sync_buffer[client_ip][timestamp]["video"] = frame
+            time.sleep(0.005)
+
+    def receive_audio_loop(self):
+        while self.running:
+            while not self.audio_comm.audio_queue.empty():
+                audio_bytes, timestamp, sender_ip = self.audio_comm.audio_queue.get()
+                client_ip = sender_ip
+                timestamp -= self.meeting_start_time
+                if client_ip not in self.sync_buffer:
+                    self.sync_buffer[client_ip] = {}
+                if timestamp not in self.sync_buffer[client_ip]:
+                    self.sync_buffer[client_ip][timestamp] = {"video": None, "audio": None}
+                self.sync_buffer[client_ip][timestamp]["audio"] = audio_bytes
             time.sleep(0.005)
 
     def handle_msgs_from_client_logic(self, opcode, data):
@@ -155,6 +171,17 @@ class Host:
                 self.commands[opcode](data)
         except Exception as e:
             print(f"Error handling message: {e}")
+
+    def handle_msgs_from_guests(self):
+        """
+
+        """
+        while self.running:
+            msg = self.msgQ.get()
+            print(f"Received message from guest: {msg}")
+            opcode, data = clientProtocol.unpack(msg)
+            if opcode in self.commands:
+                self.commands[opcode](data)
 
     def send_audio(self, username, audio, timestamp):
         """
@@ -221,7 +248,6 @@ class Host:
         if ip in self.open_clients:
             del self.open_clients[ip]
 
-
     def handle_join(self, data):
         """
         Connect a client to the call or server.
@@ -233,3 +259,33 @@ class Host:
         # [ip] = socket, port
         print("adding", ip, "to open clients")
         self.open_clients[ip] = [None,port]
+        self.send_meeting_start_time(ip)
+
+    def send_meeting_start_time(self, ip):
+        """
+        send the connected client the meeting start time for audio and video sync
+        """
+        self.host_server.send_msg(ip, clientProtocol.build_meeting_start_time(self.meeting_start_time))
+
+    def close(self):
+        print("Closing call...")
+        print("Closing call...")
+        # Stop running loops
+        self.running = False
+        # Stop camera
+        if hasattr(self, 'camera'):
+            self.camera.stop()
+        # Stop microphone
+        if hasattr(self, 'mic'):
+            self.mic.stop()
+            self.mic.close()
+        # Close video communication
+        if hasattr(self, 'video_comm'):
+            self.video_comm.close()  # implement close_all to stop threads and sockets
+        # Close audio communication
+        # if hasattr(self, 'audio_comm'):
+        #     self.audio_comm.close_all()  # implement close_all to stop threads and sockets
+
+        # Allow threads to clean up
+        time.sleep(0.1)
+        sys.exit(1)
