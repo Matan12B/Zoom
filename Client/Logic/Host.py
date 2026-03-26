@@ -11,7 +11,6 @@ from Client.Comms.videoComm     import VideoComm
 from Client.Comms.audioComm     import AudioServer
 from Client.GUI.VideoDisplay    import VideoDisplay
 from Client.Protocol            import clientProtocol
-# TODO note this is a problem!
 from Client.Comms.ClientServerComm import ClientServer
 from Common.Cipher import AESCipher
 
@@ -44,7 +43,7 @@ class Host:
         self.ip = socket.gethostbyname(hostname)
 
         self.commands = {
-            "ha" : self.handle_audio,
+            #"ha" : self.handle_audio,
             "hj" : self.handle_join,
             "hd" : self.handle_disconnect
         }
@@ -192,24 +191,24 @@ class Host:
         """
         self.audio_comm.broadcast_audio(audio, "", timestamp)
 
-    def handle_audio(self, client_ip, username, timestamp, audio):
-        """
-        Handle audio data received from clients.
-
-        :param client_ip: The IP address of the client sending the audio.
-        :param username: The username of the client sending the audio.
-        :param timestamp: The timestamp of the audio message.
-        :param audio: The audio data received from the client.
-        """
-        audio_msg = clientProtocol.build_audio_msg(timestamp, audio)
-        self.audio_comm.broadcast_audio(audio_msg, client_ip)
-        if not hasattr(self, 'sync_buffer'):
-            self.sync_buffer = {}
-        if client_ip not in self.sync_buffer:
-            self.sync_buffer[client_ip] = {}
-        if timestamp not in self.sync_buffer[client_ip]:
-            self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
-        self.sync_buffer[client_ip][timestamp]["audio"] = audio
+    # def handle_audio(self, client_ip, username, timestamp, audio):
+    #     """
+    #     Handle audio data received from clients.
+    #
+    #     :param client_ip: The IP address of the client sending the audio.
+    #     :param username: The username of the client sending the audio.
+    #     :param timestamp: The timestamp of the audio message.
+    #     :param audio: The audio data received from the client.
+    #     """
+    #     audio_msg = clientProtocol.build_audio_msg(timestamp, audio)
+    #     self.audio_comm.broadcast_audio(audio_msg, client_ip)
+    #     if not hasattr(self, 'sync_buffer'):
+    #         self.sync_buffer = {}
+    #     if client_ip not in self.sync_buffer:
+    #         self.sync_buffer[client_ip] = {}
+    #     if timestamp not in self.sync_buffer[client_ip]:
+    #         self.sync_buffer[client_ip][timestamp] = {"audio": None, "video": None}
+    #     self.sync_buffer[client_ip][timestamp]["audio"] = audio
 
 
     def handle_video(self, client_ip, username, timestamp, frame):

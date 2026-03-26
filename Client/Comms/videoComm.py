@@ -39,7 +39,7 @@ class VideoComm:
                 frame_data, header = clientProtocol.unpack_file(decrypted_data)
                 np_arr = np.frombuffer(frame_data, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                timestamp = header[1]
+                timestamp = float(header[1])
                 if frame is not None:
                     self.frameQ.put((frame, timestamp, addr))
             except OSError:

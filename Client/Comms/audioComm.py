@@ -55,7 +55,7 @@ class AudioClient:
                     audio, header = clientProtocol.unpack_file(decrypt_audio_chunk)
                     if len(header) == 3:
                         opcode = header[0]
-                        timestamp = header[1]
+                        timestamp = float(header[1])
                         sender_ip = header[2]
                         self.audio_queue.put((audio, timestamp, sender_ip))
                     else:
@@ -187,7 +187,14 @@ class AudioServer:
                             self.close_client(current_ip)
                             continue
                         if decrypt_audio_chunk:
-                            self.audio_queue.put([current_ip, decrypt_audio_chunk])
+                            audio, header = clientProtocol.unpack_file(decrypt_audio_chunk)
+                            if len(header) == 3:
+                                opcode = header[0]
+                                timestamp = float(header[1])
+                                sender_ip = header[2]
+                                self.audio_queue.put((audio, timestamp, sender_ip))
+                            else:
+                                print("incorrect audio msg")
 
     def _exchange_key(self, client_soc, client_ip):
         """

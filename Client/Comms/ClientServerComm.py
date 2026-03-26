@@ -29,7 +29,8 @@ class ClientServer:
                 if current_socket is self.server_socket:
                     client_socket, addr = self.server_socket.accept()
                     print(f"{addr[0]} connected")
-                    threading.Thread(target=self._exchange_key, args=(client_socket, addr[0],)).start()
+                    self.open_clients[addr[0]][1] = client_socket
+
                 else:
                     if current_socket in self.open_clients_soc_ip.keys():
                         decrypt_msg = ""
