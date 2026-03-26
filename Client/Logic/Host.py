@@ -40,7 +40,7 @@ class Host:
             "hd": self.handle_disconnect
         }
 
-        self.camera = CameraControl()
+        self.camera = CameraControl(jpeg_quality=5)
         self.mic = Microphone(50)
         self.AudioOutput = AudioOutput()
 
