@@ -18,7 +18,6 @@ class CameraControl:
         self.cam = cv2.VideoCapture(0)
         self.cam.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cam.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-
         self.last_frame = None
         self.running = False
         self.paused = False
@@ -47,27 +46,24 @@ class CameraControl:
             if self.paused:
                 time.sleep(0.01)
                 continue
-
             ret, frame = self.cam.read()
             if not ret:
                 continue
 
             try:
                 frame_resized = cv2.resize(frame, (self.width, self.height))
-                success, encoded_frame = cv2.imencode('.jpg', frame_resized, self.encode_param)
-                if not success:
-                    continue
-
-                frame_bytes = encoded_frame.tobytes()
                 with self.lock:
-                    self.last_frame = frame_bytes
+                    self.last_frame = frame_resized.copy()
 
             except Exception as e:
                 print(f"Camera capture error: {e}")
 
     def get_frame(self):
         with self.lock:
-            return self.last_frame
+            ret = None
+            if self.last_frame is not None:
+                ret = self.last_frame.copy()
+            return ret
 
     def release(self):
         """Call this only on app exit."""
