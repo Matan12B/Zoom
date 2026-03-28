@@ -60,7 +60,9 @@ class Host:
 
         threading.Thread(target=self.handle_msgs_from_guests, daemon=True).start()
         threading.Thread(target=self.receive_video_loop, daemon=True).start()
-        # threading.Thread(target=self.receive_audio_loop, daemon=True).start()
+        threading.Thread(target=self.receive_audio_loop, daemon=True).start()
+        threading.Thread(target=self.host_audio_send_loop, daemon=True).start()
+        threading.Thread(target=self.playback_loop, daemon=True).start()
 
         self.meeting_start_time = time.time()
 
@@ -177,6 +179,25 @@ class Host:
                 self._prune_old_frames(client_ip, keep=20)
 
             time.sleep(0.005)
+
+    def host_audio_send_loop(self):
+        while self.running:
+            try:
+                if not self.mic.running or self.meeting_start_time is None:
+                    time.sleep(0.01)
+                    continue
+
+                audio_chunk = self.mic.record()
+                if not audio_chunk:
+                    continue
+
+                timestamp = time.time() - self.meeting_start_time
+                audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
+                self.audio_comm.broadcast_audio(audio_msg, self.ip)
+
+            except Exception as e:
+                print("host audio send error:", e)
+                time.sleep(0.02)
 
     def playback_loop(self):
         """
