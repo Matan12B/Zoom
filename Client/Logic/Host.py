@@ -58,42 +58,33 @@ class Host:
         self.mic.start()
         self.mic.unmute()
 
+        self.meeting_start_time = time.time()
+
         threading.Thread(target=self.handle_msgs_from_guests, daemon=True).start()
         threading.Thread(target=self.receive_video_loop, daemon=True).start()
         threading.Thread(target=self.receive_audio_loop, daemon=True).start()
         threading.Thread(target=self.host_audio_send_loop, daemon=True).start()
         threading.Thread(target=self.playback_loop, daemon=True).start()
 
-        self.meeting_start_time = time.time()
-
-        threading.Thread(target=self.playback_loop, daemon=True).start()
-
         try:
             while self.running:
-                if self.meeting_start_time is not None:
-                    timestamp = time.time() - self.meeting_start_time
+                timestamp = time.time() - self.meeting_start_time
 
-                    frame = self.camera.get_frame()
-                    if frame is not None:
-                        while self.UI_queue.qsize() >= 1:
-                            try:
-                                self.UI_queue.get_nowait()
-                            except queue.Empty:
-                                break
+                frame = self.camera.get_frame()
+                if frame is not None:
+                    while self.UI_queue.qsize() >= 1:
+                        try:
+                            self.UI_queue.get_nowait()
+                        except queue.Empty:
+                            break
 
-                        self.UI_queue.put(frame.copy())
+                    self.UI_queue.put(frame.copy())
 
-                        ok, encoded = cv2.imencode('.jpg', frame, self.encode_params)
-                        if ok:
-                            frame_bytes = encoded.tobytes()
-                            frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
-                            self.video_comm.send_frame(frame_data)
-
-                    # if self.mic.running:
-                    #     audio_chunk = self.mic.record()
-                    #     if audio_chunk:
-                    #         audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
-                    #         self.audio_comm.broadcast_audio(audio_msg, self.ip)
+                    ok, encoded = cv2.imencode('.jpg', frame, self.encode_params)
+                    if ok:
+                        frame_bytes = encoded.tobytes()
+                        frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
+                        self.video_comm.send_frame(frame_data)
 
                 time.sleep(0.01)
 
@@ -177,6 +168,13 @@ class Host:
 
                 self.sync_buffer[client_ip][sync_ts]["audio"] = audio_bytes
                 self._prune_old_frames(client_ip, keep=20)
+
+                # relay to everyone except original sender
+                try:
+                    msg = clientProtocol.build_audio_msg(rel_timestamp, audio_bytes, sender_ip)
+                    self.audio_comm.broadcast_audio(msg, sender_ip)
+                except Exception as e:
+                    print("audio relay error:", e)
 
             time.sleep(0.005)
 
