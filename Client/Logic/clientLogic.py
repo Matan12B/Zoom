@@ -104,7 +104,6 @@ class Client:
         """
         while True:
             msg = self.msgsQ.get()
-            print(f"Received message: {msg}")
             opcode, data = clientProtocol.unpack(msg)
             if self.role:
                 self.role.handle_msgs_from_client_logic(opcode, data)

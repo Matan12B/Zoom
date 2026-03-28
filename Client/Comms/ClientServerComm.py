@@ -91,7 +91,6 @@ class ClientServer:
         """
         if client_ip in self.open_clients.keys():
             soc = self._find_socket_by_ip(client_ip)
-            print("sending msg to", client_ip)
             self._send_msg(soc, msg)
 
     def broadcast(self, msg):
