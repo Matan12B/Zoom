@@ -12,7 +12,7 @@ def unpack(msg):
         data = data[0]
     print(split)
     if opcode == "cc" and data:
-        return opcode, json.loads(data[0])
+        return opcode, json.loads(data)
     return opcode, data
 
 def unpack_file(msg):
