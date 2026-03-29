@@ -7,7 +7,7 @@ from Client.Logic.clientLogic import Client
 
 class ZoomApp(wx.App):
     def OnInit(self):
-        ip = "192.168.4.74"
+        ip = "10.0.0.14"
         self.client = Client(ip, 3018)
         self.client.start()
 
