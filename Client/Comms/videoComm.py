@@ -2,75 +2,148 @@ import socket
 import threading
 import queue
 import time
-import cv2
-import numpy as np
-from Common.Cipher import AESCipher
-from Client.Devices.Camera import CameraControl
-from Client.Protocol import clientProtocol
+
 from Client.Logic import frameAssembler
+
 
 class VideoComm:
     def __init__(self, AES, open_clients):
         """
-        Video communication over UDP with AES encryption and JPEG compression.
-        :param port: Local UDP port to bind
-        :param key_string: AES encryption key
-        :param open_clients: list of (ip, port) tuples
+        Video communication over UDP with AES encryption.
+        :param AES:
+        :param open_clients:
+        :return:
         """
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.port = 5000 # todo pull from settings file
+        self.port = 5000
         self.udp_socket.bind(("0.0.0.0", self.port))
+
         self.AES = AES
-        self.frameQ = queue.Queue()
         self.open_clients = open_clients
+        self.frameQ = queue.Queue()
+
         self.running = True
-        self.MAX_PACKET_SIZE = 65507  # max UDP datagram size
+        self.max_packet_size = 65507
+
+        self.frame_id_counter = 0
+        self.counter_lock = threading.Lock()
+
+        # one reassembler per sender ip
+        self.reassemblers = {}
+        self.last_cleanup = time.time()
+
         threading.Thread(target=self._receive_frames, daemon=True).start()
+
+    def _next_frame_id(self):
+        """
+        Return next frame id.
+        :return:
+        """
+        with self.counter_lock:
+            self.frame_id_counter = (self.frame_id_counter + 1) % 4294967295
+            return self.frame_id_counter
+
+    def _get_reassembler(self, sender_ip):
+        """
+        Return sender reassembler.
+        :param sender_ip:
+        :return:
+        """
+        if sender_ip not in self.reassemblers:
+            self.reassemblers[sender_ip] = frameAssembler.FrameReassembler()
+        return self.reassemblers[sender_ip]
 
     def _receive_frames(self):
         """
-        Continuously receive frames from other open_clients.
+        Continuously receive small encrypted video packets and rebuild frames.
+        :return:
         """
         while self.running:
             try:
-                data, addr = self.udp_socket.recvfrom(self.MAX_PACKET_SIZE)
-                decrypted_data = self.AES.decrypt_file(data)
-                # Decode JPEG bytes back to NumPy array
-                # header is opcode, timestamp
-                frame_data, header = clientProtocol.unpack_file(decrypted_data)
+                data, addr = self.udp_socket.recvfrom(self.max_packet_size)
 
-                np_arr = np.frombuffer(frame_data, np.uint8)
-                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                timestamp = float(header[1])
+                decrypted_packet = self.AES.decrypt_file(data)
+
+                sender_ip = addr[0]
+                reassembler = self._get_reassembler(sender_ip)
+
+                frame, timestamp = reassembler.handle_packet(decrypted_packet)
+
                 if frame is not None:
+                    while self.frameQ.qsize() >= 2:
+                        try:
+                            self.frameQ.get_nowait()
+                        except queue.Empty:
+                            break
+
                     self.frameQ.put((frame, timestamp, addr))
+
+                now = time.time()
+                if now - self.last_cleanup > 0.2:
+                    self.last_cleanup = now
+                    for item in self.reassemblers.values():
+                        item.cleanup_old_frames(max_age=0.5)
+
             except OSError:
-                break  # Socket closed
+                break
             except Exception as e:
                 print("Receive error:", e)
 
-    def send_frame(self, frame_data):
+    def send_frame(self, frame_bytes, timestamp):
         """
-        Send a pre-encoded JPEG frame to all open_clients.
-        :param frame_bytes: JPEG bytes (already resized and encoded)
+        Send encoded JPEG bytes to all open clients using many small UDP packets.
+        :param frame_bytes:
+        :param timestamp:
+        :return:
         """
-
-        if not frame_data:
+        if not frame_bytes:
             return
-        encrypted = self.AES.encrypt_file(frame_data)
-        for ip in self.open_clients.keys():
-            self.udp_socket.sendto(encrypted, (ip, self.port))
+
+        try:
+            frame_id = self._next_frame_id()
+            packets = frameAssembler.split_frame_to_packets(frame_id, timestamp, frame_bytes)
+        except Exception as e:
+            print("split frame error:", e)
+            return
+
+        for ip in list(self.open_clients.keys()):
+            if not ip:
+                continue
+
+            for packet in packets:
+                try:
+                    encrypted_packet = self.AES.encrypt_file(packet)
+                    self.udp_socket.sendto(encrypted_packet, (ip, self.port))
+                except Exception as e:
+                    print(f"send frame error to {ip}:", e)
+                    break
+
+    def add_user(self, user_ip, user_port):
+        """
+        Add user to broadcast list.
+        :param user_ip:
+        :param user_port:
+        :return:
+        """
+        self.open_clients[user_ip] = user_port
 
     def remove_user(self, user_ip, user_port):
         """
         Remove user from broadcast list.
+        :param user_ip:
+        :param user_port:
+        :return:
         """
-        if user_ip in self.open_clients.keys():
+        if user_ip in self.open_clients:
             del self.open_clients[user_ip]
+
+        if user_ip in self.reassemblers:
+            del self.reassemblers[user_ip]
 
     def close(self):
         """
-        Close the UDP socket.
+        Close udp socket.
+        :return:
         """
         self.running = False
         try:
@@ -78,64 +151,3 @@ class VideoComm:
         except Exception:
             pass
         self.udp_socket.close()
-
-
-def main():
-    key = "testkey123"
-    port = 5000
-    remote_port = 5001
-    remote_ip = "192.168.4.73"
-
-    # Create video communication system
-    video_comm = VideoComm(port, key, open_clients=[])
-
-    # Add remote user if provided
-    if remote_ip:
-        video_comm.add_user(remote_ip, remote_port)
-        print(f"Connected to {remote_ip}:{remote_port}")
-    else:
-        print("No remote IP provided. Waiting for incoming connections...")
-
-    print("Video communication started. Press 'q' to quit.")
-
-    # Initialize CameraControl to handle camera
-    cam = CameraControl(width=478, height=359)
-    cam.start()
-    recv_frame = None
-    addr = None
-    try:
-        while True:
-            # Get the latest frame from the CameraControl
-            frame_bytes = cam.get_frame()
-            if frame_bytes is not None:
-                # Decode JPEG bytes directly
-                frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
-                if frame is not None:
-                    video_comm.send_frame(frame)
-                    cv2.imshow("My Camera", frame)
-
-            # Display received frames from other open_clients
-            while not video_comm.frameQ.empty():
-                recv_frame, addr = video_comm.frameQ.get()
-
-            if recv_frame is not None:
-                cv2.imshow(f"Received from {addr}", recv_frame)
-
-            # Exit condition
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-            time.sleep(1/24)  # slight delay to reduce CPU
-
-    except KeyboardInterrupt:
-        print("Shutting down...")
-
-    finally:
-        # Release camera and close windows
-        cam.stop()
-        cv2.destroyAllWindows()
-        video_comm.close()
-
-
-if __name__ == "__main__":
-    main()

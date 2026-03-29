@@ -1,5 +1,3 @@
-# Host.py
-
 import threading
 import time
 import socket
@@ -41,16 +39,14 @@ class Host:
             "hd": self.handle_disconnect
         }
 
-        self.camera = CameraControl(jpeg_quality=5)
+        self.camera = CameraControl(width=320, height=240, jpeg_quality=5)
+        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 30]
         self.mic = Microphone(50, rate=16000, channels=1, chunk=160)
-        self.av_sync = AVSyncManager(playout_delay=0.04)
         self.AudioOutput = AudioOutput(rate=16000, channels=1)
+        self.av_sync = AVSyncManager(playout_delay=0.03)
 
-        # lower bitrate a lot
-        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 45]
-
-        # explicit video send throttle
-        self.video_send_interval = 1 / 20.0  # 20 FPS
+        self.video_send_interval = 1 / 12.0
+        self.last_video_enqueue_time = 0.0
         self.last_video_send_time = 0.0
 
         self.meeting_start_time = None
@@ -89,12 +85,11 @@ class Host:
                     if now - self.last_video_send_time >= self.video_send_interval:
                         self.last_video_send_time = now
                         timestamp = now - self.meeting_start_time
-
                         ok, encoded = cv2.imencode(".jpg", frame, self.encode_params)
-                        if ok:
-                            frame_bytes = encoded.tobytes()
-                            frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
-                            self.video_comm.send_frame(frame_data)
+                        if not ok:
+                            continue
+                        frame_bytes = encoded.tobytes()
+                        self.video_comm.send_frame(frame_bytes, timestamp)
                 time.sleep(0.005)
         except KeyboardInterrupt:
             print("Call interrupted.")

@@ -1,5 +1,3 @@
-# clientLogic.py
-
 import queue
 import threading
 import time

@@ -3,15 +3,10 @@ import threading
 import queue
 import sys
 import time
-
 from Client.Protocol import clientProtocol
-
 from Common.Cipher import DiffiHelman, AESCipher
-
-
 import os
 
-# client
 class ClientComm:
     def __init__(self, server_ip, port, recvQ, AES=None):
         self.my_socket = socket.socket()

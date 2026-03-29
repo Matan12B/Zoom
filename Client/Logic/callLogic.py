@@ -81,17 +81,12 @@ class CallLogic:
             "cc": self.get_connected_clients
         }
 
-        self.camera = CameraControl(jpeg_quality=5)
-
-        # lower bitrate
-        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 45]
-
+        self.camera = CameraControl(width=320, height=240, jpeg_quality=5)
+        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 30]
         self.mic = Microphone(50, rate=16000, channels=1, chunk=160)
         self.AudioOutput = AudioOutput(rate=16000, channels=1)
-        self.av_sync = AVSyncManager(playout_delay=0.04)
-
-        # explicit video send throttle
-        self.video_send_interval = 1 / 20.0  # 20 FPS
+        self.av_sync = AVSyncManager(playout_delay=0.03)
+        self.video_send_interval = 1 / 12.0
         self.last_video_enqueue_time = 0.0
 
         self.meeting_start_time = None
@@ -166,10 +161,8 @@ class CallLogic:
                 ok, encoded = cv2.imencode(".jpg", frame, self.encode_params)
                 if not ok:
                     continue
-
                 frame_bytes = encoded.tobytes()
-                frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
-                self.video_comm.send_frame(frame_data)
+                self.video_comm.send_frame(frame_bytes, timestamp)
 
             except queue.Empty:
                 continue
@@ -206,15 +199,13 @@ class CallLogic:
                         break
 
                     sender_ip = addr[0]
-
+                    if sender_ip == self.ip:
+                        continue
                     if sender_ip not in self.open_clients:
                         self.open_clients[sender_ip] = self.open_clients.get(self.host_ip, 0)
-
                     if video_data is None:
                         continue
-
                     self.av_sync.add_video(sender_ip, float(timestamp), video_data)
-
                 time.sleep(0.005)
 
             except Exception as e:
@@ -316,13 +307,16 @@ class CallLogic:
         """
         self.open_clients[self.host_ip] = username
 
-    def get_connected_clients(self, connected_clients : dict ):
-        """
-        get clients currently in the meeting
-        """
-        if type(connected_clients) == dict:
-            for ip in connected_clients.keys():
-                self.open_clients[ip] = connected_clients[ip]
+    def get_connected_clients(self, connected_clients: dict):
+        if not isinstance(connected_clients, dict):
+            return
+
+        for ip, username in connected_clients.items():
+            if ip == self.ip:
+                continue
+            if ip == self.host_ip:
+                continue
+            self.open_clients[ip] = {"username": username}
 
     def handle_video_msg(self, data):
         try:

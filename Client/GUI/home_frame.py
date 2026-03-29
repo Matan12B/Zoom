@@ -1,5 +1,3 @@
-# home_frame.py
-
 import time
 import wx
 from call_frame import CallFrame

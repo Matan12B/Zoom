@@ -1,12 +1,9 @@
-# av_sync.py
-# lower the fixed jitter buffer for LAN
-
 import time
 import heapq
 
 
 class AVSyncManager:
-    def __init__(self, playout_delay=0.04):
+    def __init__(self, playout_delay=0.03):
         self.playout_delay = playout_delay
         self.states = {}
 
@@ -27,10 +24,21 @@ class AVSyncManager:
         target_time = state["playout_base"] + (float(sender_ts) - state["first_sender_ts"])
         heapq.heappush(state["audio_heap"], (target_time, float(sender_ts), audio_bytes))
 
+        if len(state["audio_heap"]) > 50:
+            newest = sorted(state["audio_heap"], key=lambda x: x[1], reverse=True)[:50]
+            state["audio_heap"] = newest
+            heapq.heapify(state["audio_heap"])
+
     def add_video(self, sender_ip, sender_ts, frame):
         state = self._ensure_state(sender_ip, sender_ts)
         target_time = state["playout_base"] + (float(sender_ts) - state["first_sender_ts"])
         heapq.heappush(state["video_heap"], (target_time, float(sender_ts), frame))
+
+        # keep only the newest few video frames
+        if len(state["video_heap"]) > 3:
+            newest = sorted(state["video_heap"], key=lambda x: x[1], reverse=True)[:3]
+            state["video_heap"] = newest
+            heapq.heapify(state["video_heap"])
 
     def pop_due_audio(self, sender_ip, now=None):
         if now is None:
@@ -62,8 +70,9 @@ class AVSyncManager:
 
         if latest_frame is not None:
             state["last_video_frame"] = latest_frame
+            return latest_frame
 
-        return latest_frame
+        return state["last_video_frame"]
 
     def remove_sender(self, sender_ip):
         if sender_ip in self.states:

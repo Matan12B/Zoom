@@ -1,10 +1,10 @@
-
 import math
 import struct
 import time
 import cv2
 import numpy as np
-FRAME_PARTS = 4
+
+MAX_CHUNK_SIZE = 1000
 
 # frame_id      -> 4 bytes unsigned int
 # timestamp     -> 8 bytes double
@@ -15,19 +15,26 @@ HEADER_FORMAT = "!IdBBH"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 
-def split_frame_to_4_packets(frame_id, timestamp, frame_bytes):
+def split_frame_to_packets(frame_id, timestamp, frame_bytes, chunk_size=MAX_CHUNK_SIZE):
     """
-    Split encoded frame bytes into 4 UDP packets.
-
+    Split encoded frame bytes into many small UDP packets.
     :param frame_id:
     :param timestamp:
     :param frame_bytes:
+    :param chunk_size:
     :return:
     """
-    packets = []
-    chunk_size = math.ceil(len(frame_bytes) / FRAME_PARTS)
+    if not frame_bytes:
+        return []
 
-    for part_index in range(FRAME_PARTS):
+    total_parts = math.ceil(len(frame_bytes) / chunk_size)
+
+    if total_parts > 255:
+        raise ValueError("frame is too large for current packet format")
+
+    packets = []
+
+    for part_index in range(total_parts):
         start = part_index * chunk_size
         end = start + chunk_size
         chunk = frame_bytes[start:end]
@@ -35,8 +42,8 @@ def split_frame_to_4_packets(frame_id, timestamp, frame_bytes):
         header = struct.pack(
             HEADER_FORMAT,
             frame_id,
-            timestamp,
-            FRAME_PARTS,
+            float(timestamp),
+            total_parts,
             part_index,
             len(chunk)
         )
@@ -46,35 +53,26 @@ def split_frame_to_4_packets(frame_id, timestamp, frame_bytes):
     return packets
 
 
-
-
-
 class FrameReassembler:
     def __init__(self):
         self.frame_store = {}
-        self.FRAME_PARTS = 4
-        self.HEADER_FORMAT = "!IdBBH"
-        self.HEADER_SIZE = struct.calcsize(self.HEADER_FORMAT)
 
     def handle_packet(self, packet):
         """
         Return:
         (frame, timestamp) or (None, None)
         """
-        if len(packet) < self.HEADER_SIZE:
+        if len(packet) < HEADER_SIZE:
             return None, None
 
         try:
-            header = packet[:self.HEADER_SIZE]
-            payload = packet[self.HEADER_SIZE:]
+            header = packet[:HEADER_SIZE]
+            payload = packet[HEADER_SIZE:]
 
             frame_id, timestamp, total_parts, part_index, payload_size = struct.unpack(
-                self.HEADER_FORMAT,
+                HEADER_FORMAT,
                 header
             )
-
-            if total_parts != self.FRAME_PARTS:
-                return None, None
 
             if payload_size != len(payload):
                 return None, None
@@ -87,10 +85,16 @@ class FrameReassembler:
                     "last_update": time.time()
                 }
 
-            self.frame_store[frame_id]["parts"][part_index] = payload
-            self.frame_store[frame_id]["last_update"] = time.time()
+            frame_data = self.frame_store[frame_id]
 
-            if len(self.frame_store[frame_id]["parts"]) == total_parts:
+            if frame_data["total_parts"] != total_parts:
+                del self.frame_store[frame_id]
+                return None, None
+
+            frame_data["parts"][part_index] = payload
+            frame_data["last_update"] = time.time()
+
+            if len(frame_data["parts"]) == total_parts:
                 return self.rebuild_frame(frame_id)
 
         except Exception as e:
@@ -99,6 +103,11 @@ class FrameReassembler:
         return None, None
 
     def rebuild_frame(self, frame_id):
+        """
+        Rebuild complete frame.
+        :param frame_id:
+        :return:
+        """
         if frame_id not in self.frame_store:
             return None, None
 
@@ -106,9 +115,10 @@ class FrameReassembler:
             frame_data = self.frame_store[frame_id]
             parts = frame_data["parts"]
             timestamp = frame_data["timestamp"]
+            total_parts = frame_data["total_parts"]
 
             full_bytes = b""
-            for i in range(self.FRAME_PARTS):
+            for i in range(total_parts):
                 if i not in parts:
                     return None, None
                 full_bytes += parts[i]
@@ -126,7 +136,12 @@ class FrameReassembler:
                 del self.frame_store[frame_id]
             return None, None
 
-    def cleanup_old_frames(self, max_age=2.0):
+    def cleanup_old_frames(self, max_age=0.5):
+        """
+        Remove incomplete old frames.
+        :param max_age:
+        :return:
+        """
         now = time.time()
         old_ids = []
 

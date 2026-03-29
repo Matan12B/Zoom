@@ -14,13 +14,10 @@ class Server:
         self.msgsQ = queue.Queue()
         self.comm = ServerComm(self.port, self.msgsQ)
         self.db = DB()
-
         # [ip] = [username, call_id]
         self.open_clients = {}
-
         # [call_id] = [call_key, list_of_clients, host_ip]
         self.meetings = {}
-
         # Command handlers
         self.commands = {
             "li": self.log_in,
@@ -224,7 +221,7 @@ class Server:
         Generate random 5 char string for meeting id
         :return: the meeting ID
         """
-        return ''.join(choice(ascii_uppercase) for i in range(5))
+        return ''.join(choice(ascii_uppercase) for i in range(2))
 
     @staticmethod
     def generate_port():

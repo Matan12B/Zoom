@@ -1,5 +1,3 @@
-# auth_frame.py
-
 import wx
 from home_frame import HomeFrame
 
