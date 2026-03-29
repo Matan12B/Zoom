@@ -66,8 +66,6 @@ class CallLogic:
         self.ip = get_ip_by_interface("Ethernet 4")
         if not self.ip:
             self.ip = get_fallback_ip(host_ip)
-
-        print("my ip is", self.ip)
         self.UI_queue = queue.Queue()
         self.remote_video_queue = queue.Queue()
         self.latest_remote_frames = {}
@@ -79,7 +77,8 @@ class CallLogic:
             "hd": self.handle_disconnect,
             "gmst": self.get_meeting_start_time,
             "fd": self.force_disconnect,
-            "gh": self.get_host_username
+            "gh": self.get_host_username,
+            "cc": self.get_connected_clients
         }
 
         self.camera = CameraControl(jpeg_quality=5)
@@ -317,6 +316,13 @@ class CallLogic:
         """
         self.open_clients[self.host_ip] = username
 
+    def get_connected_clients(self, connected_clients : dict ):
+        """
+        get clients currently in the meeting
+        """
+        if type(connected_clients) == dict:
+            for ip in connected_clients.keys():
+                self.open_clients[ip] = connected_clients[ip]
 
     def handle_video_msg(self, data):
         try:

@@ -70,7 +70,7 @@ def build_error(error):
     """
     return f"ge^#^{error}"
 
-def build_client_connected(existing_clients):
+def build_clients_connected(existing_clients):
     """
     build a message to send to a new client with all the currently connected clients to a meeting
     """

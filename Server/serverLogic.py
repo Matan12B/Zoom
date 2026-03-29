@@ -109,19 +109,25 @@ class Server:
             shared_key = self.meetings[meeting_id][1]
             participants = self.meetings[meeting_id][2]
             username = data[1]
-            existing_clients = list(participants)
             participants.append(ip)
 
-            if ip in self.open_clients:
-                self.open_clients[ip][1] = meeting_id
 
+            existing_clients = {}
+            for ip in self.open_clients.keys():
+                if self.open_clients[ip][1] == meeting_id:
+                    existing_clients[ip] = self.open_clients[ip][0]
             print(f"Client {ip} joined meeting {meeting_id}")
 
-            # Send success message to new client
+            if ip in self.open_clients:
+                # username added in login/signup
+                self.open_clients[ip][1] = meeting_id
+
             give_role  = serverProtocol.build_give_role("guest", meeting_port, shared_key, self.meetings[meeting_id][3])
             self.comm.send_msg(ip, give_role)
 
-            give_existing_clients = serverProtocol.build_client_connected(existing_clients)
+            give_existing_clients = serverProtocol.build_clients_connected(existing_clients)
+            self.comm.send_msg(ip, give_existing_clients)
+
             # Notify other clients
             for other_ip in existing_clients:
                 notify_existing = serverProtocol.build_client_joined(ip, meeting_port, shared_key, username)
