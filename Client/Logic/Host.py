@@ -45,7 +45,7 @@ class Host:
         self.mic = Microphone(50, rate=16000, channels=1, chunk=160)
         self.av_sync = AVSyncManager(playout_delay=0.04)
         self.AudioOutput = AudioOutput(rate=16000, channels=1)
-        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 5]
+        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
         self.meeting_start_time = None
         self.running = True
 
