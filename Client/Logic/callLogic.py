@@ -199,8 +199,7 @@ class CallLogic:
                     continue
 
                 frame_bytes = encoded.tobytes()
-                frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
-                self.video_comm.send_frame(frame_data)
+                self.video_comm.send_frame(frame_bytes, timestamp)
 
             except queue.Empty:
                 continue
