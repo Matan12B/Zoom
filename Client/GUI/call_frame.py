@@ -350,20 +350,15 @@ class CallFrame(wx.Frame):
             self.video_panels[i].clear_panel()
 
     def _get_display_name_for_ip(self, client_ip):
-        """
-        Return display name for ip.
-        """
-        try:
-            if hasattr(self.call_logic, "open_clients") and client_ip in self.call_logic.open_clients:
-                value = self.call_logic.open_clients[client_ip]
-                if isinstance(value, dict):
-                    return value.get("username", client_ip)
-                if isinstance(value, list) and len(value) >= 3:
-                    return value[2]
-                if isinstance(value, str):
-                    return value
-        except Exception:
-            pass
+        if hasattr(self.call_logic, "open_clients") and client_ip in self.call_logic.open_clients:
+            value = self.call_logic.open_clients[client_ip]
+
+            if isinstance(value, dict):
+                return value.get("username", client_ip)
+
+            if isinstance(value, str):
+                return value
+
         return client_ip
 
     def _get_connected_remote_clients(self):

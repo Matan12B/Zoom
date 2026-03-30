@@ -50,24 +50,34 @@ def get_fallback_ip(host_ip):
     finally:
         s.close()
 
+
 class CallLogic:
-    def __init__(self, port, meeting_key, comm, host_ip, meeting_code, username):
-        self.open_clients = {}   # ip -> port, username
+    def __init__(self, port, meeting_key, comm, host_ip, meeting_code, username=""):
         self.msgs_from_host = queue.Queue()
         self.comm_with_server = comm
         self.AES = AESCipher(meeting_key)
         self.meeting_code = meeting_code
+        self.username = username
+
         self.comm_with_host = ClientComm(host_ip, port, self.msgs_from_host, self.AES)
+
+        # IMPORTANT:
+        # keep a clean participant table: ip -> {"username": str}
+        self.open_clients = {}
+
         self.video_comm = VideoComm(self.AES, self.open_clients)
         self.audio_comm = AudioClient(host_ip, self.AES)
-        # ip = [port, username]
+
         self.host_ip = host_ip
-        self.username = username
+        self.host_video_ip = None
+
         self.ip = get_ip_by_interface("Ethernet 4")
         if not self.ip:
             self.ip = get_fallback_ip(host_ip)
+
+        # host is always known from the start
         self.open_clients[self.host_ip] = {"username": "Host"}
-        print("my ip is", self.ip)
+
         self.UI_queue = queue.Queue()
         self.remote_video_queue = queue.Queue()
         self.latest_remote_frames = {}
@@ -83,20 +93,45 @@ class CallLogic:
             "cc": self.get_connected_clients
         }
 
-        self.camera = CameraControl(width=320, height=240, jpeg_quality=5)
-        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 30]
+        self.camera = CameraControl(jpeg_quality=5)
+        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 45]
+
         self.mic = Microphone(50, rate=16000, channels=1, chunk=160)
         self.AudioOutput = AudioOutput(rate=16000, channels=1)
-        self.av_sync = AVSyncManager(playout_delay=0.03)
-        self.video_send_interval = 1 / 12.0
+        self.av_sync = AVSyncManager(playout_delay=0.04)
+
+        self.video_send_interval = 1 / 20.0
         self.last_video_enqueue_time = 0.0
 
         self.meeting_start_time = None
         self.running = True
         self.send_queue = queue.Queue(maxsize=1)
 
-    # callLogic.py
-    # replace start() with this
+    def _canonical_sender_ip(self, sender_ip):
+        """
+        Map real UDP sender ip to the participant ip used by the GUI/control layer.
+        :param sender_ip:
+        :return:
+        """
+        if sender_ip == self.ip:
+            return self.ip
+
+        if sender_ip in self.open_clients:
+            return sender_ip
+
+        # if host control ip and host UDP ip differ, bind them once
+        if self.host_video_ip is not None and sender_ip == self.host_video_ip:
+            return self.host_ip
+
+        # if the only known remote at this point is the host,
+        # treat the first unknown sender as host video ip
+        known_remote_ips = [ip for ip in self.open_clients.keys() if ip != self.ip]
+        if self.host_ip in known_remote_ips and len(known_remote_ips) == 1:
+            self.host_video_ip = sender_ip
+            print("Mapped host UDP ip", sender_ip, "to host control ip", self.host_ip)
+            return self.host_ip
+
+        return sender_ip
 
     def start(self):
         print("Starting guest call...")
@@ -132,7 +167,6 @@ class CallLogic:
                 self.UI_queue.put(frame)
 
                 if self.meeting_start_time is not None:
-                    # enqueue only at controlled FPS
                     if now - self.last_video_enqueue_time >= self.video_send_interval:
                         self.last_video_enqueue_time = now
                         timestamp = now - self.meeting_start_time
@@ -163,8 +197,10 @@ class CallLogic:
                 ok, encoded = cv2.imencode(".jpg", frame, self.encode_params)
                 if not ok:
                     continue
+
                 frame_bytes = encoded.tobytes()
-                self.video_comm.send_frame(frame_bytes, timestamp)
+                frame_data = clientProtocol.build_video_msg(timestamp, frame_bytes)
+                self.video_comm.send_frame(frame_data)
 
             except queue.Empty:
                 continue
@@ -191,7 +227,6 @@ class CallLogic:
                 print("audio_send_loop error:", e)
                 time.sleep(0.02)
 
-
     def receive_video_loop(self):
         while self.running:
             try:
@@ -200,13 +235,23 @@ class CallLogic:
                         video_data, timestamp, addr = self.video_comm.frameQ.get_nowait()
                     except queue.Empty:
                         break
+
                     sender_ip = addr[0]
-                    if sender_ip == self.ip or video_data is None:
+                    sender_ip = self._canonical_sender_ip(sender_ip)
+
+                    if sender_ip == self.ip:
                         continue
+
                     if sender_ip not in self.open_clients:
                         self.open_clients[sender_ip] = {"username": sender_ip}
+
+                    if video_data is None:
+                        continue
+
                     self.av_sync.add_video(sender_ip, float(timestamp), video_data)
+
                 time.sleep(0.005)
+
             except Exception as e:
                 print("receive_video_loop error:", e)
                 time.sleep(0.05)
@@ -219,12 +264,19 @@ class CallLogic:
                         audio_bytes, timestamp, sender_ip = self.audio_comm.audio_queue.get_nowait()
                     except queue.Empty:
                         break
+
+                    sender_ip = self._canonical_sender_ip(sender_ip)
+
                     if sender_ip == self.ip:
                         continue
+
                     if sender_ip not in self.open_clients:
                         self.open_clients[sender_ip] = {"username": sender_ip}
+
                     self.av_sync.add_audio(sender_ip, float(timestamp), audio_bytes)
+
                 time.sleep(0.001)
+
             except Exception as e:
                 print("receive_audio_loop error:", e)
                 time.sleep(0.01)
@@ -306,7 +358,7 @@ class CallLogic:
         """
         get host username
         """
-        if self.host_ip not in self.open_clients or not isinstance(self.open_clients[self.host_ip], dict):
+        if self.host_ip not in self.open_clients:
             self.open_clients[self.host_ip] = {}
 
         self.open_clients[self.host_ip]["username"] = username
@@ -315,12 +367,13 @@ class CallLogic:
         """
         get clients currently in the meeting
         """
-        if not isinstance(connected_clients, dict):
-            return
-        for ip, username in connected_clients.items():
-            if ip == self.ip or ip == self.host_ip:
-                continue
-            self.open_clients[ip] = {"username": username}
+        if isinstance(connected_clients, dict):
+            for ip, username in connected_clients.items():
+                if ip == self.ip:
+                    continue
+                if ip == self.host_ip:
+                    continue
+                self.open_clients[ip] = {"username": username}
 
     def handle_video_msg(self, data):
         try:
@@ -331,6 +384,7 @@ class CallLogic:
             print("video msg parse error:", e)
             return
 
+        sender_ip = self._canonical_sender_ip(sender_ip)
         self.av_sync.add_video(sender_ip, timestamp, frame)
 
     def handle_audio_msg(self, data):
@@ -342,20 +396,17 @@ class CallLogic:
             print("audio msg parse error:", e)
             return
 
+        sender_ip = self._canonical_sender_ip(sender_ip)
         self.av_sync.add_audio(sender_ip, timestamp, audio)
 
     def handle_join(self, data):
-        """
-
-        :param data:
-        :return:
-        """
         try:
             ip = data[0]
             username = data[1]
         except Exception as e:
             print("join parse error:", e)
             return
+
         if ip == self.ip:
             return
 
