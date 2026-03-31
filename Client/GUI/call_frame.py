@@ -283,6 +283,11 @@ class CallFrame(wx.Frame):
         if self.is_closing:
             return
 
+        # Call ended externally (e.g. kicked by host)
+        if not getattr(self.call_logic, 'running', True):
+            self._shutdown()
+            return
+
         self._update_self_frame()
         self._update_remote_frames_from_queue()
         self._draw_remote_panels()
