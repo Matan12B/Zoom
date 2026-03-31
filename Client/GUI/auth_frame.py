@@ -46,7 +46,7 @@ class AuthFrame(wx.Frame):
         main_sizer.Add(self.password_box, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 15)
 
         main_sizer.Add(self.submit_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 15)
-        main_sizer.Add(self.status_text, 0, wx.ALL | wx.CENTER, 15)
+        main_sizer.Add(self.status_text, 0, wx.ALL | wx.LEFT, 15)
 
         panel.SetSizer(main_sizer)
 
