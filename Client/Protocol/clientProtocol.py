@@ -34,8 +34,10 @@ def unpack_file(msg):
     # Extract header and video
     header_bytes = msg[4:4 + header_len]
     file_data = msg[4 + header_len:]
-    header_str = header_bytes.decode()  # "hv^#^12345678"
-    return file_data, header_str.split("^#^") # video_data, opcode , timestamp or sender_ip
+    # "hv^#^12345678"
+    header_str = header_bytes.decode()
+    # video_data, opcode , timestamp or sender_ip
+    return file_data, header_str.split("^#^")
 
 def build_login(username,password):
     """
@@ -75,8 +77,8 @@ def build_kick_msg():
 def build_video_msg(timestamp, frame):
     """
     Return an video  msg build in the protocol structure
+    :return: f"hv^#^{timestamp}^#^{video_data}"
     """
-    # return f"hv^#^{timestamp}^#^{video_data}"
     header = f"hv^#^{timestamp}".encode()
     header_len_bytes = struct.pack(">I", len(header))
     video_bytes = frame
@@ -113,11 +115,6 @@ def build_open_meeting_msg():
     """
     return "om"
 
-def build_username_msg(username):
-    """
-    Return a username msg built in the protocol structure
-    """
-    return f"gh^#^{username}"
 
 def build_meeting_start_time(meeting_start):
     """
@@ -125,13 +122,6 @@ def build_meeting_start_time(meeting_start):
     """
     return f"gmst^#^{meeting_start}"
 
-def build_connected_clients(clients_dict):
-    """
-
-    :param clients_dict:
-    :return:
-    """
-    return f"cc^#^{json.dumps(clients_dict)}"
 
 
 

@@ -1,9 +1,7 @@
 import threading
 import time
-import socket
 import cv2
 import queue
-import psutil
 
 from Client.Devices.Camera import CameraControl
 from Client.Devices.Microphone import Microphone
@@ -14,141 +12,80 @@ from Client.Protocol import clientProtocol
 from Client.Comms.ClientServerComm import ClientServer
 from Common.Cipher import AESCipher
 from Client.Logic.av_sync import AVSyncManager
-
-def get_ip_by_interface(interface_name="Ethernet 4"):
-    """
-    Return the IPv4 address of the given network interface.
-    :param interface_name:
-    :return:
-    """
-    addrs = psutil.net_if_addrs()
-
-    if interface_name not in addrs:
-        return None
-
-    for addr in addrs[interface_name]:
-        if addr.family == socket.AF_INET:
-            return addr.address
-
-    return None
+from Client.Logic.callParticipant import CallParticipant
 
 
-def get_fallback_ip():
-    """
-    Return fallback local IPv4.
-    :return:
-    """
-    hostname = socket.gethostname()
-    try:
-        return socket.gethostbyname(hostname)
-    except Exception:
-        return "127.0.0.1"
-class Host:
+class Host(CallParticipant):
     def __init__(self, port, meeting_key, comm, meeting_code, username):
-        self.open_clients = {}   # ip -> [socket, port]
-        self.msgQ = queue.Queue()
-        self.host_comm = comm
-        self.AES = AESCipher(meeting_key)
-        self.meeting_code = meeting_code
+        """
+        Initialize the host participant: shared devices via parent, plus
+        the host-side TCP server and AudioServer for managing guests.
 
+        :param port: TCP port for the host's ClientServer.
+        :param meeting_key: Shared AES key for the meeting.
+        :param comm: Communication channel to the central server.
+        :param meeting_code: The meeting room code.
+        :param username: Host's display name.
+        """
+        super().__init__(
+            meeting_key=meeting_key,
+            comm=comm,
+            meeting_code=meeting_code,
+            username=username,
+            fallback_target_ip="8.8.8.8",
+            playout_delay=0.03
+        )
+
+        self.msgQ = queue.Queue()
         self.host_server = ClientServer(port, self.msgQ, self.open_clients, self.AES)
         self.audio_comm = AudioServer(AES=self.AES, open_clients=self.open_clients)
-        self.video_comm = VideoComm(self.AES, self.open_clients)
-
-        hostname = socket.gethostname()
-        self.ip = socket.gethostbyname(hostname)
-        self.username = username
-        self.ip = get_ip_by_interface("Ethernet 4")
-        if not self.ip:
-            self.ip = get_fallback_ip()
-
-        self.UI_queue = queue.Queue()
-        self.remote_video_queue = queue.Queue()
-        self.latest_remote_frames = {}
 
         self.commands = {
             "hj": self.handle_join,
             "hd": self.handle_disconnect
         }
 
-        self.camera = CameraControl(width=320, height=240, jpeg_quality=5)
-        self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 30]
-        self.mic = Microphone(50, rate=16000, channels=1, chunk=160)
-        self.AudioOutput = AudioOutput(rate=16000, channels=1)
-        self.av_sync = AVSyncManager(playout_delay=0.03)
-        self.video_send_interval = 1 / 12.0
-        self.last_video_enqueue_time = 0.0
-        self.last_video_send_time = 0.0
-        self.meeting_start_time = None
-        self.running = True
+    def _default_client_entry(self, ip):
+        """
+        Return a host-style open_clients entry for a newly seen video sender.
 
-    def start(self):
-        print("Starting call...")
+        :param ip: The new client's IP address.
+        :return: List placeholder [socket, port].
+        """
+        return [None, 0]
 
-        self.camera.start()
-        self.mic.start()
-        self.mic.unmute()
+    def _pre_start(self):
+        """
+        Set the meeting start time so the host can immediately begin timestamping AV data.
+        """
         self.meeting_start_time = time.time()
 
+    def _start_threads(self):
+        """
+        Start host-specific background threads: guest message handler,
+        audio receive/relay loop, and host mic send loop.
+        """
         threading.Thread(target=self.handle_msgs_from_guests, daemon=True).start()
-        threading.Thread(target=self.receive_video_loop, daemon=True).start()
         threading.Thread(target=self.receive_audio_loop, daemon=True).start()
         threading.Thread(target=self.host_audio_send_loop, daemon=True).start()
-        threading.Thread(target=self.playback_loop, daemon=True).start()
 
-        try:
-            while self.running:
-                now = time.time()
-                frame = self.camera.get_frame()
+    def _send_video(self, frame, timestamp):
+        """
+        Encode the frame as JPEG and send it directly to all guests.
 
-                if frame is not None:
-                    while self.UI_queue.qsize() >= 1:
-                        try:
-                            self.UI_queue.get_nowait()
-                        except queue.Empty:
-                            break
-                    self.UI_queue.put(frame.copy())
-                    # send only at controlled FPS
-                    if now - self.last_video_send_time >= self.video_send_interval:
-                        self.last_video_send_time = now
-                        timestamp = now - self.meeting_start_time
-                        ok, encoded = cv2.imencode(".jpg", frame, self.encode_params)
-                        if not ok:
-                            continue
-                        frame_bytes = encoded.tobytes()
-                        self.video_comm.send_frame(frame_bytes, timestamp)
-                time.sleep(0.005)
-        except KeyboardInterrupt:
-            print("Call interrupted.")
-        finally:
-            self.close()
-
-    def receive_video_loop(self):
-        while self.running:
-            try:
-                while not self.video_comm.frameQ.empty():
-                    try:
-                        video_data, timestamp, addr = self.video_comm.frameQ.get_nowait()
-                    except queue.Empty:
-                        break
-
-                    client_ip = addr[0]
-
-                    if client_ip not in self.open_clients:
-                        self.open_clients[client_ip] = [None, 0]
-
-                    if video_data is None:
-                        continue
-
-                    self.av_sync.add_video(client_ip, float(timestamp), video_data)
-
-                time.sleep(0.005)
-
-            except Exception as e:
-                print("receive_video_loop error:", e)
-                time.sleep(0.05)
+        :param frame: Raw OpenCV frame (numpy array).
+        :param timestamp: Float timestamp relative to meeting start.
+        """
+        ok, encoded = cv2.imencode(".jpg", frame, self.encode_params)
+        if ok:
+            self.video_comm.send_frame(encoded.tobytes(), timestamp)
 
     def receive_audio_loop(self):
+        """
+        Drain incoming audio from guests, feed into AV sync,
+        and broadcast each chunk back to all other guests.
+        Runs in a background daemon thread.
+        """
         while self.running:
             try:
                 while not self.audio_comm.audio_queue.empty():
@@ -156,16 +93,14 @@ class Host:
                         audio_bytes, timestamp, sender_ip = self.audio_comm.audio_queue.get_nowait()
                     except queue.Empty:
                         break
+
                     self.av_sync.add_audio(sender_ip, float(timestamp), audio_bytes)
+
                     try:
                         msg = clientProtocol.build_audio_msg(float(timestamp), audio_bytes, sender_ip)
                         self.audio_comm.broadcast_audio(msg, sender_ip)
                     except Exception as e:
                         print("audio relay error:", e)
-
-                    # TEMP DEBUG:
-                    # uncomment this line once just to verify host output device works
-                    # self.AudioOutput.play_bytes(audio_bytes)
 
                 time.sleep(0.001)
 
@@ -174,6 +109,11 @@ class Host:
                 time.sleep(0.01)
 
     def host_audio_send_loop(self):
+        """
+        Continuously record from the microphone and broadcast the host's
+        audio to all connected guests.
+        Runs in a background daemon thread.
+        """
         while self.running:
             try:
                 if not self.mic.running or self.meeting_start_time is None:
@@ -192,34 +132,13 @@ class Host:
                 print("host_audio_send_loop error:", e)
                 time.sleep(0.02)
 
-    def playback_loop(self):
-        while self.running:
-            now = time.monotonic()
-
-            for client_ip in list(self.av_sync.states.keys()):
-                try:
-                    due_audio = self.av_sync.pop_due_audio(client_ip, now)
-                    for _, audio_bytes in due_audio:
-                        self.AudioOutput.play_bytes(audio_bytes)
-
-                    frame = self.av_sync.pop_latest_due_video(client_ip, now)
-                    if frame is not None:
-                        self.latest_remote_frames[client_ip] = frame
-
-                        while self.remote_video_queue.qsize() >= 3:
-                            try:
-                                self.remote_video_queue.get_nowait()
-                            except queue.Empty:
-                                break
-
-                        self.remote_video_queue.put((client_ip, frame))
-
-                except Exception as e:
-                    print("playback_loop error:", e)
-
-            time.sleep(0.001)
-
     def handle_msgs_from_client_logic(self, opcode, data):
+        """
+        Dispatch a command received from the local client logic layer.
+
+        :param opcode: Command string key.
+        :param data: Associated data payload.
+        """
         try:
             if opcode in self.commands:
                 self.commands[opcode](data)
@@ -227,6 +146,11 @@ class Host:
             print(f"Error handling message: {e}")
 
     def handle_msgs_from_guests(self):
+        """
+        Consume messages from the guest TCP queue, unpack them,
+        and dispatch to the appropriate command handler.
+        Runs in a background daemon thread.
+        """
         while self.running:
             msg = self.msgQ.get()
             print(f"Received message from guest: {msg}")
@@ -254,26 +178,13 @@ class Host:
                 except Exception as e:
                     print(f"Error in command {opcode}: {e}")
 
-    def handle_disconnect(self, data):
-        ip = data[0] if len(data) > 0 else ""
-        username = data[1] if len(data) > 1 else ip
-
-        print(username, "left the call")
-
-        if ip in self.open_clients:
-            del self.open_clients[ip]
-
-        if ip in self.latest_remote_frames:
-            del self.latest_remote_frames[ip]
-
-        self.av_sync.remove_sender(ip)
-
-        try:
-            self.video_comm.remove_user(ip, 0)
-        except Exception:
-            pass
-
     def handle_join(self, data):
+        """
+        Handle a guest joining: register their info, wait for socket assignment,
+        then send them the meeting start time, host username, and current client list.
+
+        :param data: List [ip, port, ?, username].
+        """
         ip = data[0]
         port = int(data[1])
         client_username = data[3]
@@ -302,52 +213,45 @@ class Host:
 
     def send_meeting_start_time(self, ip):
         """
-        send relative time to all guests for av sync
+        Send the meeting start timestamp to a guest for AV sync alignment.
+
+        :param ip: Target guest's IP address.
         """
         msg = clientProtocol.build_meeting_start_time(self.meeting_start_time)
         self.host_server.send_msg(ip, msg)
 
     def send_username(self, ip, username):
         """
-        send host username
+        Send the host's display name to a guest.
+
+        :param ip: Target guest's IP address.
+        :param username: The host's username string.
         """
         msg = clientProtocol.build_username_msg(username)
         self.host_server.send_msg(ip, msg)
 
-    def leave_call(self):
-        self.close()
+    def send_connected_clients(self, target_ip):
+        """
+        Send the list of currently connected clients to a newly joined guest.
 
-    def close(self):
-        if not self.running:
-            return
-        msg2server = clientProtocol.build_leave_meeting(self.meeting_code)
-        self.host_comm.send_msg(msg2server)
-        print("Closing call...")
-        self.running = False
+        :param target_ip: The new guest's IP address.
+        """
+        clients_dict = {}
+        for ip, value in self.open_clients.items():
+            if ip == target_ip or ip == self.ip:
+                continue
+            if isinstance(value, list) and len(value) >= 3:
+                clients_dict[ip] = value[2]
 
+        msg = clientProtocol.build_connected_clients(clients_dict)
+        self.host_server.send_msg(target_ip, msg)
+
+    def _close_comms(self):
+        """
+        Close the AudioServer and host TCP server after devices are cleaned up.
+        """
         try:
-            self.camera.stop()
-        except Exception as e:
-            print("camera stop error:", e)
-
-        try:
-            self.mic.stop()
-        except Exception as e:
-            print("mic stop error:", e)
-
-        try:
-            self.AudioOutput.stop()
-        except Exception as e:
-            print("audio output stop error:", e)
-
-        try:
-            self.video_comm.close()
-        except Exception as e:
-            print("video close error:", e)
-
-        try:
-            if hasattr(self.audio_comm, "close"):
-                self.audio_comm.close()
+            self.audio_comm.close()
         except Exception as e:
             print("audio close error:", e)
 
@@ -357,21 +261,13 @@ class Host:
         except Exception as e:
             print("host server close error:", e)
 
-        time.sleep(0.1)
-
-    def send_connected_clients(self, target_ip):
+    def close(self):
         """
-        Send all currently connected clients to the new guest.
-        :param target_ip:
-        :return:
+        Notify the central server of the meeting closing, then run full teardown.
         """
-        clients_dict = {}
+        if not self.running:
+            return
+        msg2server = clientProtocol.build_leave_meeting(self.meeting_code)
+        self.comm.send_msg(msg2server)
+        super().close()
 
-        for ip, value in self.open_clients.items():
-            if ip == target_ip or ip == self.ip:
-                continue
-            if isinstance(value, list) and len(value) >= 3:
-                clients_dict[ip] = value[2]
-
-        msg = clientProtocol.build_connected_clients(clients_dict)
-        self.host_server.send_msg(target_ip, msg)

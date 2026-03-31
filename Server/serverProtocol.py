@@ -2,11 +2,15 @@ import json
 
 def unpack(msg):
     """
-    Return opcode and list of parameters from the msg
+    Return opcode and parameters from the msg.
+    Returns data as a string if there is exactly one parameter,
+    or as a list if there are zero or multiple parameters.
     """
     split = msg.split("^#^")
     opcode = split[0]
     data = split[1:]
+    if len(data) == 1:
+        return opcode, data[0]
     return opcode, data
 
 def build_login_status(status):
@@ -76,6 +80,14 @@ def build_clients_connected(existing_clients):
     build a message to send to a new client with all the currently connected clients to a meeting
     """
     return f"cc^#^{json.dumps(existing_clients)}"
+
+def build_participant_left(ip):
+    """
+    build msg to tell a client a certain client left the meeting
+    :param ip: the ip of the client that left
+    :return: msg to send to client
+    """
+    return f"hd^#^{ip}"
 
 
 

@@ -17,6 +17,26 @@ class ClientServer:
         self.server_socket.listen(4)
         threading.Thread(target=self._mainLoop,).start()
 
+    def _recv_exact(self, sock, size):
+        """
+        Receive exactly `size` bytes from a socket, handling TCP fragmentation.
+
+        :param sock: The socket to read from.
+        :param size: Number of bytes to read.
+        :return: The received bytes, or None if the connection was lost or an error occurred.
+        """
+        data = b""
+        while len(data) < size:
+            try:
+                chunk = sock.recv(size - len(data))
+            except Exception as e:
+                print(f"client server recv error: {e}")
+                return None
+            if not chunk:
+                return None
+            data += chunk
+        return data
+
     def _mainLoop(self):
         """
         adds new clients and recv messages
@@ -37,15 +57,17 @@ class ClientServer:
                 else:
                     if current_socket in self.open_clients_soc_ip.keys():
                         decrypt_msg = ""
-                        msg = ""
                         current_ip = self._find_ip_by_socket(current_socket)
                         try:
-                            length = current_socket.recv(8).decode()
-                            if length:
-                                msg = current_socket.recv(int(length))
-                            else:
+                            length_bytes = self._recv_exact(current_socket, 10)
+                            if not length_bytes:
                                 self.close_client(current_ip)
-                            if current_ip and current_ip in self.open_clients and msg:
+                                continue
+                            msg = self._recv_exact(current_socket, int(length_bytes.decode()))
+                            if not msg:
+                                self.close_client(current_ip)
+                                continue
+                            if current_ip and current_ip in self.open_clients:
                                 decrypt_msg = self.AES.decrypt(msg)
                         except Exception as e:
                             print(f"error in receiving message - {e}")

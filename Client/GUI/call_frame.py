@@ -260,6 +260,16 @@ class CallFrame(wx.Frame):
 
         threading.Thread(target=self.call_logic.start, daemon=True).start()
 
+    def _run_call(self):
+        try:
+            self.call_logic.start()
+        except Exception as e:
+            wx.CallAfter(self._on_call_error, str(e))
+
+    def _on_call_error(self, message):
+        wx.MessageBox(f"Could not connect: {message}", "Connection Error", wx.OK | wx.ICON_ERROR)
+        self._shutdown()
+
     def update_frames(self, event):
         """
         Update self panel and remote panels.
@@ -358,7 +368,6 @@ class CallFrame(wx.Frame):
 
             if isinstance(value, str):
                 return value
-
         return client_ip
 
     def _get_connected_remote_clients(self):

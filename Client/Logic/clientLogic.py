@@ -13,14 +13,12 @@ class Client:
         self.port = port
         self.msgsQ = queue.Queue()
         self.comm = ClientComm(self.server_ip, self.port, self.msgsQ)
-
         self.role = None
         self.username = ""
         self.password = ""
         self.meeting_code = None
         self.active = None
         self.handle_msgs_running = False
-
         self.commands = {
             "gmc": self.get_meeting_code,
             "ir": self.initialize_role,
@@ -32,15 +30,13 @@ class Client:
         """
         Start the client and message thread
         """
-        if self.handle_msgs_running:
-            return
-
-        time.sleep(0.2)
-        threading.Thread(
-            target=self.handle_msgs,
-            daemon=True
-        ).start()
-        self.handle_msgs_running = True
+        if not self.handle_msgs_running:
+            self.handle_msgs_running = True
+            time.sleep(0.2)
+            threading.Thread(
+                target=self.handle_msgs,
+                daemon=True
+            ).start()
 
     def start_meeting(self):
         """
@@ -99,11 +95,9 @@ class Client:
             msg = self.msgsQ.get()
             print(msg)
             opcode, data = clientProtocol.unpack(msg)
-
             if self.role:
                 self.role.handle_msgs_from_client_logic(opcode, data)
                 continue
-
             if opcode in self.commands:
                 self.commands[opcode](data)
 
@@ -153,9 +147,9 @@ def main():
     port = int(input("Enter port"))
     client = Client(ip, port)
     client.start()
-
     while True:
         time.sleep(1)
+
 
 
 if __name__ == "__main__":

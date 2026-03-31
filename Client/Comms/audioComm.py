@@ -10,6 +10,13 @@ from Client.Protocol import clientProtocol
 
 class AudioClient:
     def __init__(self, server_ip, AES, port=3000):
+        """
+        Initialize the AudioClient and connect to the audio server in a background thread.
+
+        :param server_ip: IP address of the audio server to connect to.
+        :param AES: AES cipher instance used for encrypting/decrypting audio data.
+        :param port: TCP port of the audio server (default: 3000).
+        """
         self.server_ip = server_ip
         self.port = port
         self.cipher = AES
@@ -25,6 +32,12 @@ class AudioClient:
         threading.Thread(target=self._main_loop, daemon=True).start()
 
     def _recv_exact(self, size):
+        """
+        Receive exactly `size` bytes from the server socket.
+
+        :param size: Number of bytes to read.
+        :return: The received bytes, or None if the connection was lost or an error occurred.
+        """
         data = b""
         while len(data) < size and self.running and self.open:
             try:
@@ -41,6 +54,10 @@ class AudioClient:
         return data
 
     def _main_loop(self):
+        """
+        Connect to the server and continuously receive encrypted audio chunks,
+        decrypting and queuing them for playback. Runs in a background daemon thread.
+        """
         try:
             self.my_socket.connect((self.server_ip, self.port))
         except Exception as e:
@@ -85,6 +102,12 @@ class AudioClient:
                 break
 
     def send_audio(self, audio_chunk):
+        """
+        Encrypt and send an audio chunk to the server.
+
+        :param audio_chunk: Raw audio bytes to send.
+        :return: True if sent successfully, False otherwise.
+        """
         if not self.cipher or not self.open:
             return False
 
@@ -99,6 +122,9 @@ class AudioClient:
             return False
 
     def _close_client(self):
+        """
+        Shut down and close the client socket, marking the connection as closed.
+        """
         self.open = False
 
         try:
@@ -112,12 +138,22 @@ class AudioClient:
             print(f"error closing audio client socket: {e}")
 
     def close_client(self):
+        """
+        Stop the client's receive loop and close the connection gracefully.
+        """
         self.running = False
         self._close_client()
 
 
 class AudioServer:
     def __init__(self, port=3000, AES=None, open_clients=None):
+        """
+        Initialize and start the AudioServer, binding to the given port and listening for connections.
+
+        :param port: TCP port to listen on (default: 3000).
+        :param AES: AES cipher instance used for encrypting/decrypting audio data.
+        :param open_clients: Optional dict of already-tracked clients (IP -> socket).
+        """
         self.port = port
         self.AES = AES
         self.open_clients = open_clients if open_clients is not None else {}
@@ -139,6 +175,13 @@ class AudioServer:
         threading.Thread(target=self._main_loop, daemon=True).start()
 
     def _recv_exact(self, sock, size):
+        """
+        Receive exactly `size` bytes from a given client socket.
+
+        :param sock: The client socket to read from.
+        :param size: Number of bytes to read.
+        :return: The received bytes, or None if the connection was lost or an error occurred.
+        """
         data = b""
         while len(data) < size and self.running:
             try:
@@ -155,6 +198,11 @@ class AudioServer:
         return data
 
     def _main_loop(self):
+        """
+        Accept new client connections and receive encrypted audio from connected clients
+        using select-based multiplexing. Decrypted audio is placed on the audio_queue.
+        Runs in a background daemon thread.
+        """
         print("audio server listen on port:", self.port)
 
         while self.running:
@@ -218,6 +266,12 @@ class AudioServer:
                         self.close_client(client_ip)
 
     def send_audio(self, client_ip, audio_msg):
+        """
+        Encrypt and send an audio message to a specific connected client.
+
+        :param client_ip: IP address of the target client.
+        :param audio_msg: Raw audio bytes to send.
+        """
         if client_ip not in self.audio_clients or not self.AES:
             return
 
@@ -232,34 +286,40 @@ class AudioServer:
             self.close_client(client_ip)
 
     def broadcast_audio(self, audio_msg, sender_ip):
+        """
+        Send an audio message to all connected clients except the sender.
+
+        :param audio_msg: Raw audio bytes to broadcast.
+        :param sender_ip: IP address of the original sender, who will be excluded.
+        """
         for ip in list(self.audio_clients.keys()):
             if ip != sender_ip:
                 self.send_audio(ip, audio_msg)
 
     def close_client(self, client_ip):
-        try:
-            if client_ip not in self.audio_clients:
-                return
+        """
+        Disconnect and remove a specific client from the server.
 
-            client_socket = self.audio_clients[client_ip]
-
-            if client_socket in self.socket_to_ip:
-                del self.socket_to_ip[client_socket]
-
-            del self.audio_clients[client_ip]
-
+        :param client_ip: IP address of the client to close.
+        """
+        if client_ip in self.audio_clients:
             try:
-                client_socket.shutdown(socket.SHUT_RDWR)
-            except Exception:
-                pass
-
-            client_socket.close()
-            print(f"Audio client {client_ip} closed.")
-
-        except Exception as e:
-            print(f"error closing audio client {client_ip}: {e}")
+                client_socket = self.audio_clients[client_ip]
+                self.socket_to_ip.pop(client_socket, None)
+                self.audio_clients.pop(client_ip, None)
+                try:
+                    client_socket.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+                client_socket.close()
+                print(f"Audio client {client_ip} closed.")
+            except Exception as e:
+                print(f"error closing audio client {client_ip}: {e}")
 
     def close(self):
+        """
+        Stop the server, close all client connections, and release the server socket.
+        """
         self.running = False
 
         for ip in list(self.audio_clients.keys()):

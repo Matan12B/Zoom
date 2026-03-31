@@ -14,40 +14,69 @@ class ClientComm:
         self.port = port
         self.recvQ = recvQ
         self.cipher = AES
-        self.open = False
+        self.running = False
         self.open_clients= {}
+        self.connected = threading.Event()
+        self.error: str = ""
         threading.Thread(target=self._mainLoop,).start()
+
+    def _recv_exact(self, size):
+        """
+        Receive exactly `size` bytes from the server socket, handling TCP fragmentation.
+
+        :param size: Number of bytes to read.
+        :return: The received bytes, or None if the connection was lost or an error occurred.
+        """
+        data = b""
+        error = False
+        while len(data) < size and self.running and not error:
+            try:
+                chunk = self.my_socket.recv(size - len(data))
+                if not chunk:
+                    error = True
+                else:
+                    data += chunk
+            except Exception as e:
+                print(f"client recv error: {e}")
+                error = True
+        return None if error else data
 
     def _mainLoop(self):
         """
-        conect to client and exhcange keys and recv messages
+        connect to client and exchange keys and recv messages
         :return: None
         """
+        connect = False
         try:
             self.my_socket.connect((self.server_ip, self.port))
+            connect = True
         except Exception as e:
-            print("error in connect:", e)
-            sys.exit("server is down - try later")
-
-        self._exchange_key()
-        if not self.cipher:
-            sys.exit("couldn't exchange keys")
-        self.open = True
-        while True:
-            if self.open:
-                decrypt_msg = ""
-                try:
-                    length = self.my_socket.recv(10).decode()
-                    if length:
-                        msg = self.my_socket.recv(int(length))
-                        decrypt_msg = self.cipher.decrypt(msg)
-                except Exception as e:
-                    print(f"error in receiving message here - {e}")
+            self.error = f"connection failed: {e}"
+        if connect:
+            self._exchange_key()
+            if not self.cipher:
+                self.error = "key exchange failed"
+            else:
+                self.running = True
+        while self.running:
+            try:
+                length_bytes = self._recv_exact(10)
+                if not length_bytes:
+                    print("Server disconnected gracefully.")
                     self._close_client()
-                    continue
-
-                if decrypt_msg:
-                    self.recvQ.put(decrypt_msg)
+                    break
+                msg = self._recv_exact(int(length_bytes.decode()))
+                if not msg:
+                    print("Server disconnected gracefully.")
+                    self._close_client()
+                    break
+                decrypt_msg = self.cipher.decrypt(msg)
+            except Exception as e:
+                print(f"error in receiving message here - {e}")
+                self._close_client()
+                break
+            if decrypt_msg:
+                self.recvQ.put(decrypt_msg)
 
     def _close_client(self):
         """
@@ -59,7 +88,7 @@ class ClientComm:
             print("Client connection closed.")
         except Exception as e:
             print(f"Error closing client: {e}")
-        self.open = False
+        self.running = False
 
     def close_client(self):
         """
@@ -107,17 +136,17 @@ class ClientComm:
         :return:
         """
         flag = False
-        if self.cipher and self.open:
+        if self.cipher and self.running:
             msg = self.cipher.encrypt(msg)
             if len(msg) > 0:
                 try:
-                    self.my_socket.send(str(len(msg)).zfill(8).encode())
+                    self.my_socket.send(str(len(msg)).zfill(10).encode())
                     self.my_socket.send(msg)
                     flag = True
                 except Exception as e:
                     print(f"error in sending message - {e}")
                     self._close_client()
-                    self.open = False
+                    self.running = False
         return flag
 
 if __name__ == "__main__":

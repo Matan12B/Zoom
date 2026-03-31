@@ -50,7 +50,8 @@ class Server:
         if self.db.verify_user(username, password):
             status = "1"
             self.open_clients[ip] = [username, None]
-            print(f"Login successful: {username} from {ip}")
+            print(f"Login successful: \n"
+                  f"username: {username} ip: {ip}")
         else:
             status = "0"
             print(f"Login failed for {username} from {ip}")
@@ -142,7 +143,7 @@ class Server:
         """
         if meeting_id in self.meetings.keys():
             # Notify all participants
-            for client_ip in self.meetings[meeting_id][1]:
+            for client_ip in self.meetings[meeting_id][2]:
                 msg = serverProtocol.build_meeting_closed()
                 self.comm.send_msg(client_ip, msg)
                 # Clear client's meeting ID
@@ -158,29 +159,27 @@ class Server:
         """
         Handle client disconnection
         :param ip: Client IP address
-        :param data: Additional data (optional)
+        :param data: Meeting code string or single-element list containing it
         """
-        if data in self.meetings.keys() and self.meetings[data][2][3] == ip:
-            self.close_meeting(ip, data)
+        meeting_id = data
+
+        if meeting_id in self.meetings.keys() and self.meetings[meeting_id][3] == ip:
+            self.close_meeting(ip, meeting_id)
         elif ip in self.open_clients:
             username = self.open_clients[ip][0]
             meeting_id = self.open_clients[ip][1]
 
-            # Remove from meeting if in one
             if meeting_id and meeting_id in self.meetings:
-                self.meetings[meeting_id][1].remove(ip)
+                self.meetings[meeting_id][2].remove(ip)
 
-                # Notify other participants
-                for client_ip in self.meetings[meeting_id][1]:
+                for client_ip in self.meetings[meeting_id][2]:
                     msg = serverProtocol.build_participant_left(ip)
                     self.comm.send_msg(client_ip, msg)
 
-                # If meeting is empty, close it
-                if not self.meetings[meeting_id][1]:
+                if not self.meetings[meeting_id][2]:
                     del self.meetings[meeting_id]
                     print(f"Meeting {meeting_id} closed (empty)")
 
-            # Remove client
             del self.open_clients[ip]
             print(f"Client disconnected: {username} ({ip})")
         else:
@@ -193,12 +192,7 @@ class Server:
         while True:
             ip, msg = self.msgsQ.get()
             try:
-                unpacked = serverProtocol.unpack(msg)
-                if len(unpacked) < 2:
-                    opcode = unpacked[0]
-                    data = None
-                else:
-                    opcode, data = serverProtocol.unpack(msg)
+                opcode, data = serverProtocol.unpack(msg)
                 if opcode in self.commands:
                     self.commands[opcode](ip, data)
                 else:

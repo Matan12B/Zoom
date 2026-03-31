@@ -17,6 +17,26 @@ class ServerComm:
         self.server_socket.listen(4)
         threading.Thread(target=self._mainLoop,).start()
 
+    def _recv_exact(self, sock, size):
+        """
+        Receive exactly `size` bytes from a socket, handling TCP fragmentation.
+
+        :param sock: The socket to read from.
+        :param size: Number of bytes to read.
+        :return: The received bytes, or None if the connection was lost or an error occurred.
+        """
+        data = b""
+        while len(data) < size:
+            try:
+                chunk = sock.recv(size - len(data))
+            except Exception as e:
+                print(f"server recv error: {e}")
+                return None
+            if not chunk:
+                return None
+            data += chunk
+        return data
+
     def _mainLoop(self):
         """
         adds new clients and recv messages
@@ -33,15 +53,17 @@ class ServerComm:
                 else:
                     if current_socket in self.open_clients_soc_ip.keys():
                         decrypt_msg = ""
-                        msg = ""
                         current_ip = self._find_ip_by_socket(current_socket)
                         try:
-                            length = current_socket.recv(8).decode()
-                            if length:
-                                msg = current_socket.recv(int(length))
-                            else:
+                            length_bytes = self._recv_exact(current_socket, 10)
+                            if not length_bytes:
                                 self.close_client(current_ip)
-                            if current_ip and current_ip in self.open_clients and msg:
+                                continue
+                            msg = self._recv_exact(current_socket, int(length_bytes.decode()))
+                            if not msg:
+                                self.close_client(current_ip)
+                                continue
+                            if current_ip and current_ip in self.open_clients:
                                 decrypt_msg = self.open_clients[current_ip][1].decrypt(msg)
                         except Exception as e:
                             print(f"error in receiving message - {e}")
@@ -74,18 +96,19 @@ class ServerComm:
         else:
             print(f"Failed to establish shared key with {client_ip}")
 
-
-
     def close_client(self, client_ip):
-        """Closes the client connection safely."""
+        """
+        Safely disconnects a client and removes them from tracking dictionaries.
+        Note: use .pop() instead of del to prevent thread-safety errors
+        (KeyErrors) if multiple threads try to close the same client at once.
+        :param client_ip: The IP address of the client to disconnect.
+        """
         try:
             if client_ip in self.open_clients:
                 client_soc = self.open_clients[client_ip][0]
-
-                # Remove from dicts first
-                del self.open_clients_soc_ip[client_soc]
-                del self.open_clients[client_ip]
-                # Now close socket
+                # Safely remove from dictionaries without throwing KeyErrors
+                self.open_clients_soc_ip.pop(client_soc, None)
+                self.open_clients.pop(client_ip, None)
                 client_soc.close()
                 print(f"Client {client_ip} closed.")
         except Exception as e:
@@ -106,10 +129,10 @@ class ServerComm:
 
     def send_msg(self, client_ip, msg):
         """
-
-        :param client_ip:
-        :param msg:
-        :return:
+        send msg to client
+        :param client_ip: clients ip
+        :param msg: msg to send
+        :return: None
         """
         if client_ip in self.open_clients.keys():
             soc = self._find_socket_by_ip(client_ip)
