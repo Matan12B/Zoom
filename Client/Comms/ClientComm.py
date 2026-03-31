@@ -29,7 +29,7 @@ class ClientComm:
         """
         data = b""
         error = False
-        while len(data) < size and self.running and not error:
+        while len(data) < size and not error:
             try:
                 chunk = self.my_socket.recv(size - len(data))
                 if not chunk:

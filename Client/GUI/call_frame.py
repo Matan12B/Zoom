@@ -101,7 +101,13 @@ class VideoPanel(wx.Panel):
 
         # ---------- draw background / frame ----------
         if self.current_bitmap is not None:
-            dc.DrawBitmap(self.current_bitmap, 0, 0)
+            bmp_w = self.current_bitmap.GetWidth()
+            bmp_h = self.current_bitmap.GetHeight()
+            if bmp_w != width or bmp_h != height:
+                img = self.current_bitmap.ConvertToImage().Scale(width, height, wx.IMAGE_QUALITY_NORMAL)
+                dc.DrawBitmap(img.ConvertToBitmap(), 0, 0)
+            else:
+                dc.DrawBitmap(self.current_bitmap, 0, 0)
         elif self.show_black:
             dc.SetBrush(wx.Brush(wx.Colour(0, 0, 0)))
             dc.SetPen(wx.Pen(wx.Colour(0, 0, 0)))
