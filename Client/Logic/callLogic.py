@@ -54,12 +54,15 @@ class CallLogic(CallParticipant):
         """
         Map the raw UDP sender IP to the canonical participant IP,
         and return None to skip frames from self.
+        Never discards frames from the host even on same-machine testing.
 
         :param addr: UDP (ip, port) tuple from recvfrom.
         :return: Canonical IP string, or None to discard the frame.
         """
         sender_ip = self._canonical_sender_ip(addr[0])
-        return None if sender_ip == self.ip else sender_ip
+        if sender_ip == self.ip and sender_ip != self.host_ip:
+            return None
+        return sender_ip
 
     def _canonical_sender_ip(self, sender_ip):
         """

@@ -377,6 +377,9 @@ class CallFrame(wx.Frame):
             if isinstance(value, dict):
                 return value.get("username", client_ip)
 
+            if isinstance(value, list) and len(value) >= 3:
+                return value[2] if value[2] else client_ip
+
             if isinstance(value, str):
                 return value
         return client_ip
@@ -384,17 +387,22 @@ class CallFrame(wx.Frame):
     def _get_connected_remote_clients(self):
         """
         Return connected clients except self.
+        Never excludes the host even when testing on the same machine.
         """
         connected_clients = []
 
         if not hasattr(self.call_logic, "open_clients"):
             return connected_clients
 
+        my_ip = getattr(self.call_logic, "ip", None)
+        host_ip = getattr(self.call_logic, "host_ip", None)
+
         try:
             seen = set()
 
             for client_ip in self.call_logic.open_clients.keys():
-                if hasattr(self.call_logic, "ip") and client_ip == self.call_logic.ip:
+                # Skip self IP, but always keep the host (same-machine testing)
+                if client_ip == my_ip and client_ip != host_ip:
                     continue
 
                 if client_ip in seen:
