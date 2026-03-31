@@ -83,7 +83,9 @@ class ServerComm:
         client_public_key = None
         try:
             client_soc.send(str(diffie.public_key).zfill(5).encode())
-            client_public_key = int(client_soc.recv(5).decode())
+            raw = self._recv_exact(client_soc, 5)
+            if raw:
+                client_public_key = int(raw.decode())
         except Exception as e:
             print(f"Error in sending/receiving public key: {e}")
         if client_public_key:

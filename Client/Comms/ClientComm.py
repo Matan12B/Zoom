@@ -54,7 +54,8 @@ class ClientComm:
             self.error = f"connection failed: {e}"
             self.connected.set()
         if connect:
-            self._exchange_key()
+            if self.cipher is None:
+                self._exchange_key()
             if not self.cipher:
                 self.error = "key exchange failed"
                 self.connected.set()
@@ -109,7 +110,9 @@ class ClientComm:
         server_public_key = None
         ret = None
         try:
-            server_public_key = int(self.my_socket.recv(5).decode())
+            raw = self._recv_exact(5)
+            if raw:
+                server_public_key = int(raw.decode())
             self.my_socket.send(str(diffie.public_key).zfill(5).encode())
         except Exception as e:
             print(f"Error in receiving/sending public key: {e}")
