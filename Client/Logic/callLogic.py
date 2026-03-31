@@ -306,11 +306,11 @@ class CallLogic(CallParticipant):
         """
         Register a new participant who joined the meeting.
 
-        :param data: List [ip, username].
+        :param data: List [ip, port, shared_key, username].
         """
         try:
             ip = data[0]
-            username = data[1]
+            username = data[3]
         except Exception as e:
             print("join parse error:", e)
             return

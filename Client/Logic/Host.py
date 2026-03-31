@@ -195,11 +195,8 @@ class Host(CallParticipant):
         if ip not in self.open_clients:
             self.open_clients[ip] = [None, port, client_username]
         else:
-            if isinstance(self.open_clients[ip], list) and len(self.open_clients[ip]) >= 3:
-                self.open_clients[ip][1] = port
-                self.open_clients[ip][2] = client_username
-            else:
-                self.open_clients[ip] = [None, port, client_username]
+            existing_socket = self.open_clients[ip][0] if isinstance(self.open_clients[ip], list) else None
+            self.open_clients[ip] = [existing_socket, port, client_username]
 
         time.sleep(0.1)
 
