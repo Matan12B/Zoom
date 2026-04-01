@@ -55,6 +55,33 @@ class AVSyncManager:
 
         return due_audio
 
+    def pop_one_due_audio(self, sender_ip, now=None, stale_threshold=0.15):
+        """
+        Return exactly ONE due audio chunk for sender_ip, dropping stale chunks first.
+        Stale = target_time older than (now - stale_threshold).
+
+        Returns (sender_ts, audio_bytes) tuple, or None if nothing is due yet.
+        """
+        if now is None:
+            now = time.monotonic()
+
+        state = self.states.get(sender_ip)
+        if not state:
+            return None
+
+        heap = state["audio_heap"]
+
+        # Drop chunks that are too old to bother playing
+        while heap and heap[0][0] < now - stale_threshold:
+            heapq.heappop(heap)
+
+        # Return the single oldest chunk that is due now
+        if heap and heap[0][0] <= now:
+            _, sender_ts, audio_bytes = heapq.heappop(heap)
+            return (sender_ts, audio_bytes)
+
+        return None
+
     def pop_latest_due_video(self, sender_ip, now=None):
         if now is None:
             now = time.monotonic()

@@ -81,6 +81,9 @@ class VideoComm:
     def send_frame(self, frame_bytes, timestamp):
         """
         Send encoded JPEG bytes to all open clients using many small UDP packets.
+        Each packet is encrypted exactly once; the same ciphertext is sent to every
+        client (they all share the same meeting AES key), cutting encryption cost
+        from O(N*packets) to O(packets).
         :param frame_bytes:
         :param timestamp:
         :return:
@@ -93,16 +96,23 @@ class VideoComm:
         except Exception as e:
             print("split frame error:", e)
             return
-        for ip in list(self.open_clients.keys()):
-            if not ip:
-                continue
-            for packet in packets:
+
+        clients = [ip for ip in list(self.open_clients.keys()) if ip]
+        if not clients:
+            return
+
+        # Encrypt once per packet, broadcast same bytes to every client
+        for packet in packets:
+            try:
+                encrypted_packet = self.AES.encrypt_file(packet)
+            except Exception as e:
+                print("encrypt packet error:", e)
+                return
+            for ip in clients:
                 try:
-                    encrypted_packet = self.AES.encrypt_file(packet)
                     self.udp_socket.sendto(encrypted_packet, (ip, self.port))
                 except Exception as e:
                     print(f"send frame error to {ip}:", e)
-                    break
 
     def add_user(self, user_ip, user_port):
         """

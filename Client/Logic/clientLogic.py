@@ -55,7 +55,7 @@ class Client:
         """
         Send request to join meeting
         """
-        self.meeting_code = meeting_code          # save so initialize_role can pass it to CallLogic
+        self.meeting_code = meeting_code
         msg = clientProtocol.build_enter_meeting(meeting_code, self.username)
         self.comm.send_msg(msg)
 

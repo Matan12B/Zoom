@@ -22,7 +22,7 @@ class AudioClient:
         self.cipher = AES
         self.my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.my_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.audio_queue = queue.Queue()
+        self.audio_queue = queue.Queue(maxsize=60)  # ~600 ms cap; oldest dropped on overflow
         self.running = True
         self.open = False
         threading.Thread(target=self._main_loop, daemon=True).start()
@@ -80,7 +80,16 @@ class AudioClient:
                     if len(header) == 3:
                         timestamp = float(header[1])
                         sender_ip = header[2]
-                        self.audio_queue.put((audio, timestamp, sender_ip))
+                        if self.audio_queue.full():
+                            # Drop the oldest chunk to keep latency low
+                            try:
+                                self.audio_queue.get_nowait()
+                            except queue.Empty:
+                                pass
+                        try:
+                            self.audio_queue.put_nowait((audio, timestamp, sender_ip))
+                        except queue.Full:
+                            pass
                     else:
                         print("incorrect audio msg header on client")
             except Exception as e:
@@ -249,13 +258,32 @@ class AudioServer:
     def broadcast_audio(self, audio_msg, sender_ip):
         """
         Send an audio message to all connected clients except the sender.
+        Encrypts the payload exactly once and reuses the same ciphertext for every
+        recipient (all clients share the same meeting AES key), reducing CPU load
+        from O(N) to O(1) AES operations per broadcast.
 
         :param audio_msg: Raw audio bytes to broadcast.
         :param sender_ip: IP address of the original sender, who will be excluded.
         """
-        for ip in list(self.audio_clients.keys()):
-            if ip != sender_ip:
-                self.send_audio(ip, audio_msg)
+        recipients = [ip for ip in self.audio_clients if ip != sender_ip]
+        if not recipients or not self.AES:
+            return
+        try:
+            encrypted = self.AES.encrypt_file(audio_msg)
+            length_header = str(len(encrypted)).zfill(10).encode()
+        except Exception as e:
+            print(f"audio broadcast encrypt error: {e}")
+            return
+        for ip in recipients:
+            client_socket = self.audio_clients.get(ip)
+            if not client_socket:
+                continue
+            try:
+                client_socket.sendall(length_header)
+                client_socket.sendall(encrypted)
+            except Exception as e:
+                print(f"audio broadcast send error to {ip}: {e}")
+                self.close_client(ip)
 
     def close_client(self, client_ip):
         """

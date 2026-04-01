@@ -231,40 +231,43 @@ class CallParticipant:
     def playback_loop(self):
         """
         Pop due audio and video from AV sync and forward to output devices and UI queue.
-        Audio from all clients is mixed into a single write per tick to avoid
-        sequential-chunk interleaving that makes audio unintelligible.
+        Takes exactly ONE audio chunk per sender per tick so that accumulated chunks drain
+        sequentially instead of being smashed into a single mixed write (which causes
+        garbled/saturated audio).
         Runs in a background daemon thread.
         """
         import numpy as np
 
         while self.running:
             now = time.monotonic()
+            got_audio = False
 
-            # --- collect all due audio across every client ---
+            # --- one chunk per sender, mixed together for simultaneous playback ---
             mixed_audio = None
             for client_ip in list(self.av_sync.states.keys()):
                 try:
-                    due_audio = self.av_sync.pop_due_audio(client_ip, now)
-                    for _, audio_bytes in due_audio:
-                        if not audio_bytes:
-                            continue
-                        chunk = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.int32)
-                        if mixed_audio is None:
-                            mixed_audio = chunk.copy()
-                        elif len(chunk) == len(mixed_audio):
-                            mixed_audio += chunk
-                        elif len(chunk) < len(mixed_audio):
-                            mixed_audio[:len(chunk)] += chunk
-                        else:
-                            # chunk is longer — extend mixed_audio to chunk length then add
-                            extended = chunk.copy()
-                            extended[:len(mixed_audio)] += mixed_audio
-                            mixed_audio = extended
+                    result = self.av_sync.pop_one_due_audio(client_ip, now)
+                    if result is None:
+                        continue
+                    got_audio = True
+                    _, audio_bytes = result
+                    if not audio_bytes:
+                        continue
+                    chunk = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.int32)
+                    if mixed_audio is None:
+                        mixed_audio = chunk.copy()
+                    elif len(chunk) == len(mixed_audio):
+                        mixed_audio += chunk
+                    elif len(chunk) < len(mixed_audio):
+                        mixed_audio[:len(chunk)] += chunk
+                    else:
+                        extended = chunk.copy()
+                        extended[:len(mixed_audio)] += mixed_audio
+                        mixed_audio = extended
 
                 except Exception as e:
                     print("playback_loop audio error:", e)
 
-            # write one mixed chunk instead of N sequential writes
             if mixed_audio is not None:
                 try:
                     mixed_clipped = np.clip(mixed_audio, -32768, 32767).astype(np.int16)
@@ -290,7 +293,10 @@ class CallParticipant:
                 except Exception as e:
                     print("playback_loop video error:", e)
 
-            time.sleep(0.001)
+            # When audio was played, loop immediately to drain any backlog quickly.
+            # When idle, sleep briefly to avoid burning CPU.
+            if not got_audio:
+                time.sleep(0.005)
 
     # ── shared handlers ───────────────────────────────────────────────────────
 
