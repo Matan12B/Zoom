@@ -350,7 +350,7 @@ class CallFrame(wx.Frame):
         VIDEO_TIMEOUT seconds, show a black placeholder + username instead of the
         frozen last frame (av_sync caches the last frame indefinitely).
         """
-        VIDEO_TIMEOUT = 1.5  # seconds without a new network frame → show camera-off
+        VIDEO_TIMEOUT = 0.5 # seconds without a new network frame → show camera-off
 
         connected_clients = self._get_connected_remote_clients()
         connected_set = set(connected_clients)
