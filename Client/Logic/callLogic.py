@@ -81,8 +81,10 @@ class CallLogic(CallParticipant):
         if self.host_video_ip is not None and sender_ip == self.host_video_ip:
             return self.host_ip
 
-        known_remote_ips = [ip for ip in self.open_clients.keys() if ip != self.ip]
-        if self.host_ip in known_remote_ips and len(known_remote_ips) == 1:
+        # Any unrecognised sender while host video IP is still unknown must be the host
+        # (the host is always first to send UDP frames; other guests' IPs are registered
+        # in open_clients via the hj/cc messages before their frames arrive)
+        if self.host_video_ip is None and self.host_ip in self.open_clients:
             self.host_video_ip = sender_ip
             print("Mapped host UDP ip", sender_ip, "to host control ip", self.host_ip)
             return self.host_ip

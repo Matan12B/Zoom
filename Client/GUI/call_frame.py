@@ -478,6 +478,8 @@ class CallFrame(wx.Frame):
     def _shutdown(self):
         """
         Close frame safely and return to HomeFrame.
+        The heavy call_logic.close() runs in a background thread so the GUI
+        never blocks while sockets / threads wind down.
         """
         if self.is_closing:
             return
@@ -490,14 +492,7 @@ class CallFrame(wx.Frame):
         except Exception as e:
             print("timer stop error:", e)
 
-        try:
-            if hasattr(self.call_logic, "cleanup"):
-                self.call_logic.cleanup()
-            elif hasattr(self.call_logic, "close"):
-                self.call_logic.close()
-        except Exception as e:
-            print("close error:", e)
-
+        # Restore home screen immediately — don't wait for network teardown
         try:
             if self.home_frame:
                 if hasattr(self.home_frame.client, "role"):
@@ -507,6 +502,20 @@ class CallFrame(wx.Frame):
             self.Destroy()
         except Exception as e:
             print("destroy error:", e)
+
+        # Tear down the call logic in a background thread
+        call_logic = self.call_logic
+
+        def _do_close():
+            try:
+                if hasattr(call_logic, "cleanup"):
+                    call_logic.cleanup()
+                elif hasattr(call_logic, "close"):
+                    call_logic.close()
+            except Exception as e:
+                print("close error:", e)
+
+        threading.Thread(target=_do_close, daemon=True).start()
 
     def copy_meeting_code(self, event):
         code = getattr(self.call_logic, "meeting_code", "")

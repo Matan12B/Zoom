@@ -15,6 +15,7 @@ class VideoComm:
         :return:
         """
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.port = 5000
         self.udp_socket.bind(("0.0.0.0", self.port))
 
