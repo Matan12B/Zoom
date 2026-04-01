@@ -152,7 +152,11 @@ class Host(CallParticipant):
         Runs in a background daemon thread.
         """
         while self.running:
-            msg = self.msgQ.get()
+            try:
+                msg = self.msgQ.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
             print(f"Received message from guest: {msg}")
 
             try:
@@ -178,6 +182,43 @@ class Host(CallParticipant):
                 except Exception as e:
                     print(f"Error in command {opcode}: {e}")
 
+    def handle_disconnect(self, data):
+        """
+        Handle a guest leaving: resolve their username, clean up shared state,
+        close their audio connection, and broadcast the departure to remaining guests.
+
+        :param data: List where data[0] is the leaver's IP, data[1] is optional username.
+        """
+        try:
+            leaving_ip = data[0] if len(data) > 0 else ""
+            leaving_username = leaving_ip
+
+            # Capture username before base class removes the open_clients entry
+            if leaving_ip and leaving_ip in self.open_clients:
+                entry = self.open_clients[leaving_ip]
+                if isinstance(entry, list) and len(entry) >= 3 and entry[2]:
+                    leaving_username = entry[2]
+        except Exception:
+            leaving_ip = ""
+            leaving_username = ""
+
+        # Base-class cleanup: removes from open_clients, av_sync, video_comm, frames
+        super().handle_disconnect(data)
+
+        # Close the audio server connection for the departed client
+        try:
+            self.audio_comm.close_client(leaving_ip)
+        except Exception:
+            pass
+
+        # Notify all remaining guests so their UIs remove the departed participant
+        if leaving_ip:
+            try:
+                notify_msg = f"hd^#^{leaving_ip}^#^{leaving_username}"
+                self.host_server.broadcast(notify_msg)
+            except Exception as e:
+                print("disconnect broadcast error:", e)
+
     def handle_join(self, data):
         """
         Handle a guest joining: register their info, wait for socket assignment,
@@ -200,7 +241,14 @@ class Host(CallParticipant):
 
         time.sleep(0.1)
 
-        while self.running and ip in self.open_clients and self.open_clients[ip][0] is None:
+        # Wait until ClientServer assigns the TCP socket (or client disconnects)
+        deadline = time.time() + 5.0
+        while self.running and time.time() < deadline:
+            try:
+                if ip not in self.open_clients or self.open_clients[ip][0] is not None:
+                    break
+            except (KeyError, IndexError, TypeError):
+                break
             time.sleep(0.01)
 
         if self.running and ip in self.open_clients:
@@ -266,7 +314,12 @@ class Host(CallParticipant):
             return
         try:
             kick_msg = clientProtocol.build_kick_msg()
-            self.host_server.broadcast(kick_msg)
+            # broadcast without triggering disconnect notifications (host is already shutting down)
+            for ip in list(self.open_clients.keys()):
+                try:
+                    self.host_server.send_msg(ip, kick_msg)
+                except Exception:
+                    pass
             time.sleep(0.15)
         except Exception as e:
             print("kick broadcast error:", e)
