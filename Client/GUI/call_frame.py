@@ -344,11 +344,18 @@ class CallFrame(wx.Frame):
 
     def _draw_remote_panels(self):
         """
-        Draw remote users.
+        Draw remote users. Also cleans up stale remote_frames entries for
+        clients that are no longer connected.
         """
         connected_clients = self._get_connected_remote_clients()
+        connected_set = set(connected_clients)
         panel_idx = 1
         now = time.time()
+
+        # Remove stale frame entries for clients that have left
+        for stale_ip in [ip for ip in list(self.remote_frames.keys()) if ip not in connected_set]:
+            self.remote_frames.pop(stale_ip, None)
+            self.remote_frame_times.pop(stale_ip, None)
 
         for client_ip in connected_clients:
             if panel_idx >= len(self.video_panels):

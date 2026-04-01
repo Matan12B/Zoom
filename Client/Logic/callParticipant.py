@@ -231,22 +231,55 @@ class CallParticipant:
     def playback_loop(self):
         """
         Pop due audio and video from AV sync and forward to output devices and UI queue.
+        Audio from all clients is mixed into a single write per tick to avoid
+        sequential-chunk interleaving that makes audio unintelligible.
         Runs in a background daemon thread.
         """
+        import numpy as np
+
         while self.running:
             now = time.monotonic()
 
+            # --- collect all due audio across every client ---
+            mixed_audio = None
             for client_ip in list(self.av_sync.states.keys()):
                 try:
                     due_audio = self.av_sync.pop_due_audio(client_ip, now)
                     for _, audio_bytes in due_audio:
-                        self.AudioOutput.play_bytes(audio_bytes)
+                        if not audio_bytes:
+                            continue
+                        chunk = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.int32)
+                        if mixed_audio is None:
+                            mixed_audio = chunk.copy()
+                        elif len(chunk) == len(mixed_audio):
+                            mixed_audio += chunk
+                        elif len(chunk) < len(mixed_audio):
+                            mixed_audio[:len(chunk)] += chunk
+                        else:
+                            # chunk is longer — extend mixed_audio to chunk length then add
+                            extended = chunk.copy()
+                            extended[:len(mixed_audio)] += mixed_audio
+                            mixed_audio = extended
 
+                except Exception as e:
+                    print("playback_loop audio error:", e)
+
+            # write one mixed chunk instead of N sequential writes
+            if mixed_audio is not None:
+                try:
+                    mixed_clipped = np.clip(mixed_audio, -32768, 32767).astype(np.int16)
+                    self.AudioOutput.play_bytes(mixed_clipped.tobytes())
+                except Exception as e:
+                    print("playback_loop write error:", e)
+
+            # --- video: latest due frame per client ---
+            for client_ip in list(self.av_sync.states.keys()):
+                try:
                     frame = self.av_sync.pop_latest_due_video(client_ip, now)
                     if frame is not None:
                         self.latest_remote_frames[client_ip] = frame
 
-                        while self.remote_video_queue.qsize() >= 3:
+                        while self.remote_video_queue.qsize() >= max(6, len(self.av_sync.states) * 2):
                             try:
                                 self.remote_video_queue.get_nowait()
                             except queue.Empty:
@@ -255,7 +288,7 @@ class CallParticipant:
                         self.remote_video_queue.put((client_ip, frame))
 
                 except Exception as e:
-                    print("playback_loop error:", e)
+                    print("playback_loop video error:", e)
 
             time.sleep(0.001)
 

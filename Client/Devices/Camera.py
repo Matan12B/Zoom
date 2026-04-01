@@ -1,6 +1,7 @@
 import cv2
 import threading
 import time
+import platform
 
 
 class CameraControl:
@@ -28,7 +29,7 @@ class CameraControl:
 
     def _open_camera(self):
         """
-        Open camera. On Mac, AVFoundation is often more stable.
+        Open camera with a platform-appropriate backend.
         """
         try:
             if self.cam is not None and self.cam.isOpened():
@@ -36,7 +37,13 @@ class CameraControl:
         except Exception:
             pass
 
-        self.cam = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+        system = platform.system()
+        if system == "Windows":
+            self.cam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        elif system == "Darwin":
+            self.cam = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+        else:
+            self.cam = cv2.VideoCapture(0)
 
         if not self.cam or not self.cam.isOpened():
             self.cam = cv2.VideoCapture(0)

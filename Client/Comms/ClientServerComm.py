@@ -76,18 +76,30 @@ class ClientServer:
                         if decrypt_msg:
                             self.recvQ.put([current_ip, decrypt_msg])
 
-    def close_client(self, client_ip):
-        """Closes the client connection safely."""
+    def close_client(self, client_ip, notify=True):
+        """Closes the client connection safely and optionally notifies the host."""
         try:
             if client_ip in self.open_clients:
                 client_soc = self.open_clients[client_ip][0]
 
                 # Remove from dicts first
-                del self.open_clients_soc_ip[client_soc]
+                if client_soc in self.open_clients_soc_ip:
+                    del self.open_clients_soc_ip[client_soc]
                 del self.open_clients[client_ip]
                 # Now close socket
-                client_soc.close()
+                try:
+                    client_soc.close()
+                except Exception:
+                    pass
                 print(f"Client {client_ip} closed.")
+
+                # Notify the host's message handler so it can run handle_disconnect
+                if notify:
+                    try:
+                        disconnect_msg = f"hd^#^{client_ip}"
+                        self.recvQ.put([client_ip, disconnect_msg])
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"Error closing client {client_ip}: {e}")
 
@@ -124,6 +136,11 @@ class ClientServer:
         for ip in list(self.open_clients.keys()):
             if ip:
                 self.send_msg(ip, msg)
+
+    def close(self):
+        """Close all client connections without triggering disconnect notifications (used on host shutdown)."""
+        for ip in list(self.open_clients.keys()):
+            self.close_client(ip, notify=False)
 
     def _send_msg(self, client_soc, msg):
         """

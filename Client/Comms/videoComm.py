@@ -70,7 +70,9 @@ class VideoComm:
                 frame, timestamp = reassembler.handle_packet(decrypted_packet)
 
                 if frame is not None:
-                    while self.frameQ.qsize() >= 2:
+                    # Allow enough room for all connected clients (at least 20 frames)
+                    max_queued = max(20, len(self.open_clients) * 4)
+                    while self.frameQ.qsize() >= max_queued:
                         try:
                             self.frameQ.get_nowait()
                         except queue.Empty:
