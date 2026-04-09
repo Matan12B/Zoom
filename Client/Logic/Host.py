@@ -186,6 +186,30 @@ class Host(CallParticipant):
                 except Exception as e:
                     print(f"Error in command {opcode}: {e}")
 
+    def kick_client(self, client_ip):
+        """
+        Kick a specific guest from the meeting.
+        Sends them a force-disconnect message, then cleans up as if they left.
+
+        :param client_ip: IP address of the guest to kick.
+        """
+        if client_ip not in self.open_clients:
+            print(f"Cannot kick {client_ip}: not in open_clients")
+            return
+
+        # Send force-disconnect to the kicked guest
+        try:
+            kick_msg = clientProtocol.build_kick_msg()
+            self.host_server.send_msg(client_ip, kick_msg)
+        except Exception as e:
+            print(f"kick send error to {client_ip}: {e}")
+
+        # Small delay so the message has time to arrive before we tear down their socket
+        time.sleep(0.1)
+
+        # Reuse the existing disconnect handler to clean up everything
+        self.handle_disconnect([client_ip])
+
     def handle_disconnect(self, data):
         """
         Handle a guest leaving: resolve their username, clean up shared state,
@@ -206,14 +230,23 @@ class Host(CallParticipant):
             leaving_ip = ""
             leaving_username = ""
 
-        # Base-class cleanup: removes from open_clients, av_sync, video_comm, frames
-        super().handle_disconnect(data)
+        # Close host_server TCP socket BEFORE base-class cleanup deletes the IP
+        # from the shared open_clients dict.  If we delete first, ClientServerComm
+        # can no longer look up the socket → it stays in open_clients_soc_ip and
+        # select() keeps returning the dead socket, causing endless recv errors.
+        try:
+            self.host_server.close_client(leaving_ip, notify=False)
+        except Exception:
+            pass
 
         # Close the audio server connection for the departed client
         try:
             self.audio_comm.close_client(leaving_ip)
         except Exception:
             pass
+
+        # Base-class cleanup: removes from open_clients, av_sync, video_comm, frames
+        super().handle_disconnect(data)
 
         # Notify all remaining guests so their UIs remove the departed participant
         if leaving_ip:

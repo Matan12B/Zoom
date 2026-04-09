@@ -190,6 +190,8 @@ class CallFrame(wx.Frame):
         self.is_muted = False
         self.is_camera_off = False
         self.is_closing = False
+        # Host check: only the Host class has a host_server attribute
+        self.is_host = hasattr(self.call_logic, "host_server")
 
         self.panel = wx.Panel(self)
         main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -241,10 +243,15 @@ class CallFrame(wx.Frame):
 
         self.mic_btn = wx.Button(self.panel, label="Mute")
         self.cam_btn = wx.Button(self.panel, label="Camera Off")
+        self.kick_btn = wx.Button(self.panel, label="Kick")
         self.leave_btn = wx.Button(self.panel, label="Leave")
 
         controls.Add(self.mic_btn, 0, wx.ALL, 5)
         controls.Add(self.cam_btn, 0, wx.ALL, 5)
+        if self.is_host:
+            controls.Add(self.kick_btn, 0, wx.ALL, 5)
+        else:
+            self.kick_btn.Hide()
         controls.AddStretchSpacer()
         controls.Add(self.leave_btn, 0, wx.ALL, 5)
 
@@ -254,6 +261,7 @@ class CallFrame(wx.Frame):
         self.leave_btn.Bind(wx.EVT_BUTTON, self.leave_call)
         self.mic_btn.Bind(wx.EVT_BUTTON, self.toggle_mic)
         self.cam_btn.Bind(wx.EVT_BUTTON, self.toggle_camera)
+        self.kick_btn.Bind(wx.EVT_BUTTON, self.on_kick)
         self.Bind(wx.EVT_CLOSE, self.on_close)
         self.copy_code_btn.Bind(wx.EVT_BUTTON, self.copy_meeting_code)
 
@@ -471,6 +479,55 @@ class CallFrame(wx.Frame):
                 self.video_panels[0].set_black()
         except Exception as e:
             print("toggle camera error:", e)
+
+    def on_kick(self, event):
+        """
+        Show a dialog listing connected guests and kick the selected one.
+        Only available for the host.
+        """
+        if not self.is_host:
+            return
+
+        # Build list of connected guests (exclude self)
+        guests = self._get_connected_remote_clients()
+        if not guests:
+            wx.MessageBox("No guests to kick.", "Kick", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        # Build display names for the dialog
+        display_names = []
+        ip_list = []
+        for ip in guests:
+            name = self._get_display_name_for_ip(ip)
+            display_names.append(f"{name} ({ip})")
+            ip_list.append(ip)
+
+        dlg = wx.SingleChoiceDialog(
+            self,
+            "Select a guest to kick:",
+            "Kick Guest",
+            display_names
+        )
+
+        if dlg.ShowModal() == wx.ID_OK:
+            selected_idx = dlg.GetSelection()
+            selected_ip = ip_list[selected_idx]
+            selected_name = display_names[selected_idx]
+
+            # Confirm
+            confirm = wx.MessageBox(
+                f"Kick {selected_name} from the meeting?",
+                "Confirm Kick",
+                wx.YES_NO | wx.ICON_QUESTION
+            )
+            if confirm == wx.YES:
+                threading.Thread(
+                    target=self.call_logic.kick_client,
+                    args=(selected_ip,),
+                    daemon=True
+                ).start()
+
+        dlg.Destroy()
 
     def leave_call(self, event):
         """
