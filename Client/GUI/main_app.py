@@ -1,5 +1,14 @@
+import os
+import sys
+
+# Repo root on sys.path so `Client.*` and `Common.*` imports work when launched from GUI dir.
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import wx
-from auth_frame import AuthFrame
+
+from Client.GUI.auth_frame import AuthFrame
 from Client.Logic.clientLogic import Client
 from Common.settings import load_settings
 
@@ -17,6 +26,7 @@ class ZoomApp(wx.App):
         frame = AuthFrame(self.client)
         frame.Show()
         return True
+
 
 if __name__ == "__main__":
     app = ZoomApp()

@@ -353,8 +353,14 @@ class CallLogic(CallParticipant):
     def close(self):
         """
         Stop the guest call and clean up all resources.
+        Notifies the signaling server that we left the meeting (session stays logged in).
         """
         if not self.running:
             return
+        try:
+            if self.meeting_code and self.comm and getattr(self.comm, "running", False):
+                self.comm.send_msg(clientProtocol.build_leave_meeting(self.meeting_code))
+        except Exception as e:
+            print("notify server leave error:", e)
         print("Closing guest call...")
         super().close()

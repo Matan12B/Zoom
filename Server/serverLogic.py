@@ -28,7 +28,8 @@ class Server:
             "om": self.open_meeting,
             "jm": self.join_meeting,
             "cm": self.close_meeting,
-            "hd": self.handle_disconnect
+            "hd": self.handle_disconnect,
+            "lo": self.log_out,
         }
 
     def start(self):
@@ -87,7 +88,12 @@ class Server:
         :param ip: Client IP address
         :param data: Additional meeting data (optional)
         """
-        meeting_id = self.generate_call_id()
+        for _ in range(64):
+            meeting_id = self.generate_call_id()
+            if meeting_id not in self.meetings:
+                break
+        else:
+            raise RuntimeError("Could not allocate a unique meeting code")
         shared_key = self.generate_shared_key()
         # Store meeting: [call_id] = [port, shared_key, [list of client IPs], host]
         meeting_port = self.generate_port()
@@ -112,26 +118,25 @@ class Server:
             username = data[1]
             participants.append(ip)
 
-
             existing_clients = {}
-            for ip in self.open_clients.keys():
-                if self.open_clients[ip][1] == meeting_id:
-                    existing_clients[ip] = self.open_clients[ip][0]
+            for oc_ip in self.open_clients.keys():
+                if self.open_clients[oc_ip][1] == meeting_id:
+                    existing_clients[oc_ip] = self.open_clients[oc_ip][0]
             print(f"Client {ip} joined meeting {meeting_id}")
 
             if ip in self.open_clients:
-                # username added in login/signup
                 self.open_clients[ip][1] = meeting_id
 
-            give_role  = serverProtocol.build_give_role("guest", meeting_port, shared_key, self.meetings[meeting_id][3])
+            give_role = serverProtocol.build_give_role("guest", meeting_port, shared_key, self.meetings[meeting_id][3])
             self.comm.send_msg(ip, give_role)
             print("sending role")
 
             give_existing_clients = serverProtocol.build_clients_connected(existing_clients)
             self.comm.send_msg(ip, give_existing_clients)
 
-            # Notify other clients
             for other_ip in existing_clients:
+                if other_ip == ip:
+                    continue
                 notify_existing = serverProtocol.build_client_joined(ip, meeting_port, shared_key, username)
                 self.comm.send_msg(other_ip, notify_existing)
         else:
@@ -159,11 +164,28 @@ class Server:
         else:
             print(f"Meeting {meeting_id} not found")
 
+    def _remove_client_from_meeting(self, ip, meeting_id, notify_others=True):
+        """
+        Remove ip from a meeting roster. Does not remove signaling login.
+        """
+        if not meeting_id or meeting_id not in self.meetings:
+            return
+        try:
+            self.meetings[meeting_id][2].remove(ip)
+        except ValueError:
+            pass
+        if notify_others:
+            for client_ip in self.meetings[meeting_id][2]:
+                msg = serverProtocol.build_participant_left(ip)
+                self.comm.send_msg(client_ip, msg)
+        if not self.meetings[meeting_id][2]:
+            del self.meetings[meeting_id]
+            print(f"Meeting {meeting_id} closed (empty)")
+
     def handle_disconnect(self, ip, data):
         """
-        Handle client disconnection
-        :param ip: Client IP address
-        :param data: Meeting code string or single-element list containing it
+        Leave a meeting while staying logged in to the signaling server (hd).
+        Host ending their meeting uses the first branch (meeting id + host ip).
         """
         meeting_id = data
 
@@ -171,23 +193,33 @@ class Server:
             self.close_meeting(ip, meeting_id)
         elif ip in self.open_clients:
             username = self.open_clients[ip][0]
-            meeting_id = self.open_clients[ip][1]
+            current = self.open_clients[ip][1]
 
-            if meeting_id and meeting_id in self.meetings:
-                self.meetings[meeting_id][2].remove(ip)
+            if current and current in self.meetings:
+                self._remove_client_from_meeting(ip, current, notify_others=True)
 
-                for client_ip in self.meetings[meeting_id][2]:
-                    msg = serverProtocol.build_participant_left(ip)
-                    self.comm.send_msg(client_ip, msg)
-
-                if not self.meetings[meeting_id][2]:
-                    del self.meetings[meeting_id]
-                    print(f"Meeting {meeting_id} closed (empty)")
-
-            del self.open_clients[ip]
-            print(f"Client disconnected: {username} ({ip})")
+            self.open_clients[ip][1] = None
+            print(f"Client left meeting (signaling still connected): {username} ({ip})")
         else:
             print("ip or meeting code are incorrect")
+
+    def log_out(self, ip, data=None):
+        """
+        End signaling session: leave any meeting, then drop login state for this IP.
+        """
+        if ip not in self.open_clients:
+            return
+        username = self.open_clients[ip][0]
+        meeting_id = self.open_clients[ip][1]
+
+        if meeting_id and meeting_id in self.meetings:
+            if self.meetings[meeting_id][3] == ip:
+                self.close_meeting(ip, meeting_id)
+            else:
+                self._remove_client_from_meeting(ip, meeting_id, notify_others=True)
+
+        del self.open_clients[ip]
+        print(f"Logged out from signaling server: {username} ({ip})")
 
     def handle_msgs(self):
         """
@@ -216,15 +248,16 @@ class Server:
     @staticmethod
     def generate_call_id():
         """
-        Generate random 5 char string for meeting id
+        Generate random uppercase string for meeting id (reduces collision rate).
         :return: the meeting ID
         """
-        return ''.join(choice(ascii_uppercase) for i in range(2))
+        return ''.join(choice(ascii_uppercase) for i in range(5))
 
     @staticmethod
     def generate_port():
         """
-
+        create a random port between 5000 and 65535
+        :return: the port
         """
         return random.randint(5000, 65535)
 

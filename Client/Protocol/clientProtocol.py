@@ -51,11 +51,11 @@ def build_register(username,password):
     """
     return f"su^#^{username}^#^{password}"
 
-def build_enter_meeting(username ,meeting_code):
+def build_enter_meeting(meeting_code, username):
     """
-    Return a request to enter meeting msg build in the protocol structure
+    Return a join-meeting message: meeting code first, then username (server expects this order).
     """
-    return f"jm^#^{username}^#^{meeting_code}"
+    return f"jm^#^{meeting_code}^#^{username}"
 
 def build_force_close_camera():
     """
@@ -108,6 +108,11 @@ def build_leave_meeting(meeting_code):
     Return a register msg build in the protocol structure
     """
     return f"hd^#^{meeting_code}"
+
+
+def build_logout():
+    """Tell the signaling server to end this login session (TCP may close next)."""
+    return "lo^#^"
 
 def build_open_meeting_msg():
     """

@@ -13,6 +13,8 @@ class Client:
         self.port = port
         self.video_port = video_port
         self.audio_port = audio_port
+        self._dh_p = dh_p
+        self._dh_g = dh_g
         self.msgsQ = queue.Queue()
         self.comm = ClientComm(self.server_ip, self.port, self.msgsQ, dh_p=dh_p, dh_g=dh_g)
         self.role = None
@@ -20,12 +22,14 @@ class Client:
         self.password = ""
         self.meeting_code = None
         self.active = None
+        self.last_error = None
         self.handle_msgs_running = False
         self.commands = {
             "gmc": self.get_meeting_code,
             "ir": self.initialize_role,
             "ls": self.get_login_status,
-            "rs": self.get_signup_status
+            "rs": self.get_signup_status,
+            "ge": self.get_error,
         }
 
     def start(self):
@@ -44,6 +48,7 @@ class Client:
         """
         Send a request to create a meeting
         """
+        self.last_error = None
         msg = clientProtocol.build_open_meeting_msg()
         self.comm.send_msg(msg)
 
@@ -57,6 +62,7 @@ class Client:
         """
         Send request to join meeting
         """
+        self.last_error = None
         self.meeting_code = meeting_code
         msg = clientProtocol.build_enter_meeting(meeting_code, self.username)
         self.comm.send_msg(msg)
@@ -103,6 +109,9 @@ class Client:
             print(msg)
             opcode, data = clientProtocol.unpack(msg)
             if self.role:
+                # Server sends participant_left as hd^#^<ip> → data is a string; handlers expect [ip].
+                if opcode == "hd" and isinstance(data, str):
+                    data = [data]
                 self.role.handle_msgs_from_client_logic(opcode, data)
                 continue
             if opcode in self.commands:
@@ -130,6 +139,7 @@ class Client:
         self.username = username
         self.password = password
         self.active = None
+        self.last_error = None
         msg = clientProtocol.build_login(username, password)
         self.comm.send_msg(msg)
 
@@ -140,14 +150,47 @@ class Client:
         self.username = username
         self.password = password
         self.active = None
+        self.last_error = None
         msg = clientProtocol.build_register(username, password)
         self.comm.send_msg(msg)
 
     def get_error(self, data):
         """
-        print error from server
+        Store a human-readable server error (e.g. meeting not found) for the GUI.
         """
-        print("error from server - ", data)
+        if isinstance(data, str):
+            self.last_error = data
+        elif isinstance(data, list) and data:
+            self.last_error = str(data[0])
+        else:
+            self.last_error = str(data)
+        print("error from server - ", self.last_error)
+
+    def wait_signaling(self, timeout=15.0):
+        """Block until the TCP + key exchange to the signaling server completes (or timeout)."""
+        return self.comm.connected.wait(timeout=timeout)
+
+    def disconnect_from_server(self):
+        """
+        Close the signaling TCP session and open a new one (user must log in again).
+        Does not close meeting P2P — call that first if still in a call.
+        """
+        self.role = None
+        self.meeting_code = None
+        self.active = None
+        try:
+            if getattr(self.comm, "running", False) and self.comm.cipher:
+                self.comm.send_msg(clientProtocol.build_logout())
+        except Exception as e:
+            print("logout notify error:", e)
+        try:
+            self.comm.close_client()
+        except Exception as e:
+            print("close signaling error:", e)
+        self.msgsQ = queue.Queue()
+        self.comm = ClientComm(
+            self.server_ip, self.port, self.msgsQ, dh_p=self._dh_p, dh_g=self._dh_g
+        )
 
 def main():
     ip = input("Enter ip")

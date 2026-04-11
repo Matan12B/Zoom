@@ -13,7 +13,14 @@ class ClientServer:
         # soc: ip
         self.AES = meeting_AES
         self.open_clients_soc_ip = {}
-        self.server_socket.bind(('0.0.0.0', self.port))
+        try:
+            self.server_socket.bind(('0.0.0.0', self.port))
+        except OSError as e:
+            self.server_socket.close()
+            raise RuntimeError(
+                f"Host could not bind TCP meeting port {self.port} (already in use?). "
+                f"Create a new meeting or free the port. ({e})"
+            ) from e
         self.server_socket.listen(4)
         threading.Thread(target=self._mainLoop,).start()
 
