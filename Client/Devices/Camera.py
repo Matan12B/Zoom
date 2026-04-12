@@ -102,32 +102,26 @@ class CameraControl:
                     self._open_camera()
                     time.sleep(0.2)
                     continue
-
                 ret, frame = self.cam.read()
-
                 if not ret or frame is None:
                     self.failed_reads += 1
                     print(f"Camera read failed: {self.failed_reads}")
-
                     # after multi failures open camera again
                     if self.failed_reads >= 10:
                         print("Reopening camera after repeated read failures...")
                         self._open_camera()
                         self.failed_reads = 0
-
                     # if camera didnt take a pic for too long clear last_frame
                     # note: so the camera wont display the same frame multiple times if the camera isnt capturing
                     if time.time() - self.last_frame_time > 1.0:
                         with self.lock:
                             self.last_frame = None
-
                     time.sleep(0.03)
                     continue
-
                 self.failed_reads = 0
 
                 frame_resized = cv2.resize(frame, (self.width, self.height))
-
+                frame_resized = cv2.flip(frame_resized, 1)
                 with self.lock:
                     self.last_frame = frame_resized.copy()
                     self.last_frame_time = time.time()
