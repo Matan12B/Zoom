@@ -51,6 +51,7 @@ class CallLogic(CallParticipant):
             "gh": self.get_host_username,
             "cc": self.get_connected_clients,
             "tm": self.handle_mic_status,
+            "co": self.handle_camera_state,
         }
 
     def _resolve_video_sender(self, addr):
@@ -350,6 +351,17 @@ class CallLogic(CallParticipant):
     def toggle_mic(self, muted):
         """Alias for broadcast_mic_status — called by the GUI."""
         self.broadcast_mic_status(muted)
+
+    def notify_camera_state(self, is_on):
+        """
+        Guest notifies the host that their camera turned on or off.
+        The host will relay it to all other guests.
+        """
+        try:
+            msg = clientProtocol.build_camera_state(self.ip, is_on)
+            self.comm_with_host.send_msg(msg)
+        except Exception as e:
+            print("notify_camera_state error:", e)
 
     def force_disconnect(self, data=None):
         """

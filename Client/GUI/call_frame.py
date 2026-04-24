@@ -502,9 +502,17 @@ class CallFrame(wx.Frame):
             try:
                 if self.is_camera_off:
                     cam.start(); self.cam_btn.SetLabel("Camera Off"); self.is_camera_off = False
+                    try:
+                        self.call_logic.notify_camera_state(True)
+                    except Exception:
+                        pass
                 else:
                     cam.stop();  self.cam_btn.SetLabel("Camera On");  self.is_camera_off = True
                     self.last_self_frame = None; self.video_panels[0].set_black()
+                    try:
+                        self.call_logic.notify_camera_state(False)
+                    except Exception:
+                        pass
                 self._refresh_control_styles()
             except Exception as e:
                 print("toggle camera error:", e)

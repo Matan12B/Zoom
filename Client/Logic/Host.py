@@ -40,7 +40,8 @@ class Host(CallParticipant):
             "hj": self.handle_join,
             "hd": self.handle_disconnect,
             "fd": self.on_meeting_closed_by_server,
-            "tm": self.handle_mic_status
+            "tm": self.handle_mic_status,
+            "co": self.handle_camera_state,
         }
 
     def _default_client_entry(self, ip):
@@ -172,6 +173,11 @@ class Host(CallParticipant):
 
             # Use the verified TCP-layer IP for mute messages to prevent spoofing
             if opcode == "tm":
+                if isinstance(data, list) and len(data) >= 1:
+                    data[0] = guest_ip
+
+            # Same for camera-state messages
+            if opcode == "co":
                 if isinstance(data, list) and len(data) >= 1:
                     data[0] = guest_ip
 
@@ -384,6 +390,35 @@ class Host(CallParticipant):
     def toggle_mic(self, muted):
         """Alias for broadcast_mic_status — called by the GUI."""
         self.broadcast_mic_status(muted)
+
+    def handle_camera_state(self, data):
+        """
+        A guest changed their camera state.
+        Update own last_video_received_time (via base class) then relay to all other guests.
+        """
+        super().handle_camera_state(data)
+        try:
+            sender_ip = data[0] if isinstance(data, list) else data
+            is_on = bool(int(data[1])) if isinstance(data, list) and len(data) > 1 else True
+            relay = clientProtocol.build_camera_state(sender_ip, is_on)
+            for ip in list(self.open_clients.keys()):
+                if ip != sender_ip:
+                    try:
+                        self.host_server.send_msg(ip, relay)
+                    except Exception as e:
+                        print(f"camera_state relay error to {ip}: {e}")
+        except Exception as e:
+            print("handle_camera_state relay error:", e)
+
+    def notify_camera_state(self, is_on):
+        """
+        Host changed their own camera. Broadcast to all guests.
+        """
+        try:
+            msg = clientProtocol.build_camera_state(self.ip, is_on)
+            self.host_server.broadcast(msg)
+        except Exception as e:
+            print("notify_camera_state error:", e)
 
     def on_meeting_closed_by_server(self, data=None):
         """

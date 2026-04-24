@@ -205,6 +205,29 @@ class CallParticipant:
         """
         pass
 
+    def notify_camera_state(self, is_on):
+        """
+        Notify all peers that this participant turned their camera on or off.
+        Overridden by Host and CallLogic with the appropriate transport.
+        """
+        pass
+
+    def handle_camera_state(self, data):
+        """
+        A remote participant changed their camera state.
+        Force-expire their video timeout so the GUI immediately shows black (camera off)
+        or resumes normally (camera on — next real frame will update the timer).
+        """
+        try:
+            ip = data[0] if isinstance(data, list) else data
+            is_on = bool(int(data[1])) if isinstance(data, list) and len(data) > 1 else True
+        except Exception as e:
+            print("handle_camera_state parse error:", e)
+            return
+        if not is_on:
+            # Setting to 0 makes (now - 0) >> VIDEO_TIMEOUT → active=False immediately
+            self.last_video_received_time[ip] = 0
+
     def _resolve_video_sender(self, addr):
         """
         Resolve the canonical sender IP from a UDP addr tuple.

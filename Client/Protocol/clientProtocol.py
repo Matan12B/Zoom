@@ -103,6 +103,14 @@ def build_audio_msg(timestamp, audio_data, sender_ip):
     audio_bytes = audio_data
     return header_len_bytes + header + audio_bytes
 
+def build_camera_state(ip, is_on):
+    """
+    Signal that a participant turned their camera on or off.
+    is_on=True → "1"  (camera is now on)
+    is_on=False → "0" (camera is now off)
+    """
+    return f"co^#^{ip}^#^{1 if is_on else 0}"
+
 def build_toggle_mic(ip, muted):
     """
     Broadcast mic mute state.
