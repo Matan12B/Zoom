@@ -140,7 +140,7 @@ class AuthFrame(_BaseAuthFrame):
     def _add_footer_actions(self, auth_card, auth_sizer):
         footer_row = wx.BoxSizer(wx.HORIZONTAL)
         prompt = wx.StaticText(auth_card, label="Don't have an account yet?")
-        ui_theme.style_text(prompt, ui_theme.PALETTE["text_muted"])
+        ui_theme.style_text(prompt, ui_theme.PALETTE["call_ctrl_text"])
 
         self.signup_link = ui_theme.create_link(auth_card, "Create one")
         self.signup_link.Bind(wx.adv.EVT_HYPERLINK, self.open_signup)
@@ -206,7 +206,7 @@ class SignupFrame(_BaseAuthFrame):
     def _add_footer_actions(self, auth_card, auth_sizer):
         footer_row = wx.BoxSizer(wx.HORIZONTAL)
         prompt = wx.StaticText(auth_card, label="Already have an account?")
-        ui_theme.style_text(prompt, ui_theme.PALETTE["text_muted"])
+        ui_theme.style_text(prompt, ui_theme.PALETTE["call_ctrl_text"])
 
         self.back_link = ui_theme.create_link(auth_card, "Back to login")
         self.back_link.Bind(wx.adv.EVT_HYPERLINK, self.back_to_login)

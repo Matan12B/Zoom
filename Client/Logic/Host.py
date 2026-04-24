@@ -14,7 +14,6 @@ class Host(CallParticipant):
         """
         Initialize the host participant: shared devices via parent, plus
         the host-side TCP server and AudioServer for managing guests.
-
         :param port: TCP port for the host's ClientServer.
         :param meeting_key: Shared AES key for the meeting.
         :param comm: Communication channel to the central server.
@@ -41,7 +40,7 @@ class Host(CallParticipant):
             "hj": self.handle_join,
             "hd": self.handle_disconnect,
             "fd": self.on_meeting_closed_by_server,
-            "ms": self.handle_mute_state,
+            "tm": self.handle_mic_status
         }
 
     def _default_client_entry(self, ip):
@@ -108,42 +107,24 @@ class Host(CallParticipant):
         Continuously record from the microphone and broadcast the host's
         audio to all connected guests.
         Runs in a background daemon thread.
-        Stops itself gracefully after too many errors for example no audio
-        driver installed to avoid spamming the console with errors
         """
-        max_errors = 5
-        errors = 0
         while self.running:
             try:
                 if self.mic is None or not self.mic.running or self.meeting_start_time is None:
                     time.sleep(0.01)
                     continue
+
                 audio_chunk = self.mic.record()
                 if not audio_chunk:
                     continue
-                max_errors = 0  # reset counter on any success
+
                 timestamp = time.time() - self.meeting_start_time
                 audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
                 self.audio_comm.broadcast_audio(audio_msg, self.ip)
-            except Exception as e:
-                errors += 1
-                print(f"host_audio_send_loop error: {e}")
-                if errors >= max_errors:
-                    print(
-                        "host_audio_send_loop: too many consecutive errors — "
-                        "microphone disabled for this session."
-                    )
-                    try:
-                        if self.mic:
-                            self.mic.stop()
-                    except Exception:
-                        pass
-                    self.mic = None
-                    self.no_mic = True
-                    break  # exit loop — no point retrying a missing driver
 
-                # Exponential-ish back-off: 0.1 s → 0.2 s → 0.4 s … up to 2 s
-                time.sleep(min(0.1 * (2 ** (errors - 1)), 2.0))
+            except Exception as e:
+                print("host_audio_send_loop error:", e)
+                time.sleep(0.02)
 
     def handle_msgs_from_client_logic(self, opcode, data):
         """
@@ -189,9 +170,8 @@ class Host(CallParticipant):
                 else:
                     data = [guest_ip]
 
-            # Use the verified TCP-layer IP for mute-state messages so a
-            # misbehaving client cannot spoof another participant's mute state.
-            if opcode == "ms":
+            # Use the verified TCP-layer IP for mute messages to prevent spoofing
+            if opcode == "tm":
                 if isinstance(data, list) and len(data) >= 1:
                     data[0] = guest_ip
 
@@ -283,7 +263,7 @@ class Host(CallParticipant):
 
         if ip != self.ip:
             if ip not in self.open_clients:
-                # Index 3 = muted state; everyone starts muted
+                # index 3 = muted; everyone starts muted
                 self.open_clients[ip] = [None, port, client_username, True]
             else:
                 existing_socket = self.open_clients[ip][0] if isinstance(self.open_clients[ip], list) else None
@@ -305,48 +285,6 @@ class Host(CallParticipant):
                 self.send_meeting_start_time(ip)
                 self.send_username(ip, self.username)
                 self.send_connected_clients(ip)
-
-    def handle_mute_state(self, data):
-        """
-        Update the mute state of a guest and relay the change to all other guests.
-
-        :param data: List [guest_ip, "1"|"0"]  (1=muted, 0=unmuted).
-        """
-        try:
-            sender_ip = data[0]
-            is_muted = bool(int(data[1]))
-
-            # Update our own record for this guest
-            if sender_ip in self.open_clients:
-                entry = self.open_clients[sender_ip]
-                if isinstance(entry, list):
-                    # Ensure list is long enough (should be 4 elements after handle_join)
-                    while len(entry) < 4:
-                        entry.append(True)
-                    entry[3] = is_muted
-
-            # Relay to every OTHER guest (not back to the sender)
-            relay_msg = clientProtocol.build_mute_state(sender_ip, is_muted)
-            for ip in list(self.open_clients.keys()):
-                if ip != sender_ip:
-                    try:
-                        self.host_server.send_msg(ip, relay_msg)
-                    except Exception as e:
-                        print(f"mute relay error to {ip}: {e}")
-        except Exception as e:
-            print("handle_mute_state error:", e)
-
-    def toggle_mic(self, is_muted):
-        """
-        Send the host's own mute state to all connected guests.
-
-        :param is_muted: True if we are now muted, False if unmuted.
-        """
-        try:
-            msg = clientProtocol.build_mute_state(self.ip, is_muted)
-            self.host_server.broadcast(msg)
-        except Exception as e:
-            print("toggle_mic error:", e)
 
     def send_meeting_start_time(self, ip):
         """
@@ -397,6 +335,55 @@ class Host(CallParticipant):
                 self.host_server.close()
         except Exception as e:
             print("host server close error:", e)
+
+    def handle_mic_status(self, data):
+        """
+        A guest changed their mic state.
+        Store it in open_clients and relay to all other guests.
+
+        :param data: [sender_ip, "1"|"0"]
+        """
+        try:
+            sender_ip = data[0]
+            muted = bool(int(data[1]))
+        except Exception as e:
+            print("handle_mic_status parse error:", e)
+            return
+
+        if sender_ip in self.open_clients:
+            entry = self.open_clients[sender_ip]
+            if isinstance(entry, list):
+                # extend entry to hold muted flag at index 3
+                while len(entry) < 4:
+                    entry.append(None)
+                entry[3] = muted
+            elif isinstance(entry, dict):
+                entry["muted"] = muted
+
+        # Relay to all other guests
+        try:
+            relay = clientProtocol.build_toggle_mic(sender_ip, muted)
+            for ip in list(self.open_clients.keys()):
+                if ip != sender_ip:
+                    self.host_server.send_msg(ip, relay)
+        except Exception as e:
+            print("mic_status relay error:", e)
+
+    def broadcast_mic_status(self, muted):
+        """
+        Host changed their own mic. Broadcast to all guests.
+
+        :param muted: bool
+        """
+        try:
+            msg = clientProtocol.build_toggle_mic(self.ip, muted)
+            self.host_server.broadcast(msg)
+        except Exception as e:
+            print("broadcast_mic_status error:", e)
+
+    def toggle_mic(self, muted):
+        """Alias for broadcast_mic_status — called by the GUI."""
+        self.broadcast_mic_status(muted)
 
     def on_meeting_closed_by_server(self, data=None):
         """

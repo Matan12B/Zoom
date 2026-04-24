@@ -1,6 +1,0 @@
-SERVER_IP:
-P:
-G:
-video port: 5000
-audio port: 3000
-

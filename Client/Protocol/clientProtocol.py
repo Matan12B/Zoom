@@ -103,10 +103,12 @@ def build_audio_msg(timestamp, audio_data, sender_ip):
     audio_bytes = audio_data
     return header_len_bytes + header + audio_bytes
 
-def build_toggle_mic():
+def build_toggle_mic(ip, muted):
     """
-    Return a register msg build in the protocol structure
+    Broadcast mic mute state.
+    muted: bool — True = muted, False = unmuted
     """
+    return f"tm^#^{ip}^#^{1 if muted else 0}"
 
 def build_toggle_camera():
     """

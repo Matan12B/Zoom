@@ -26,11 +26,10 @@ PALETTE = {
     "call_surface": wx.Colour(12, 12, 14),
     "call_surface_alt": wx.Colour(22, 22, 26),
     "video_tile": wx.Colour(14, 14, 17),
-    # ── in-call control bar buttons ──
     "call_ctrl":        wx.Colour(38, 40, 50),
     "call_ctrl_text":   wx.Colour(210, 215, 228),
-    "call_ctrl_active": wx.Colour(180, 35, 35),    # mic-muted / cam-off
-    "call_ctrl_danger": wx.Colour(160, 30, 30),    # leave button
+    "call_ctrl_active": wx.Colour(180, 35, 35),
+    "call_ctrl_danger": wx.Colour(160, 30, 30),
 }
 
 
@@ -215,7 +214,6 @@ def style_button(button, kind="primary", min_height=44, min_width=-1):
         "warning":      (PALETTE["warning_bg"],     PALETTE["warning_text"]),
         "danger":       (PALETTE["danger"],         PALETTE["text_inverted"]),
         "danger_soft":  (PALETTE["danger_bg"],      PALETTE["danger_text"]),
-        # ── in-call dark buttons ──
         "call":         (PALETTE["call_ctrl"],      PALETTE["call_ctrl_text"]),
         "call_active":  (PALETTE["call_ctrl_active"],PALETTE["text_inverted"]),
         "call_danger":  (PALETTE["call_ctrl_danger"],PALETTE["text_inverted"]),
