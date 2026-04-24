@@ -1,5 +1,5 @@
-server_ip=10.0.0.21
-server_port=2001
+server_ip=10.0.0.22
+server_port=2000
 video_port=5000
 audio_port=3000
 dh_p=797
