@@ -23,3 +23,6 @@ __pycache__/
 *.tmp
 *.bak
 *.old
+
+#other
+*.docx
