@@ -103,7 +103,7 @@ class CallParticipant:
             self.no_camera = True
         self.encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
         try:
-            self.mic = Microphone(80, rate=16000, channels=1, chunk=160)
+            self.mic = Microphone(100, rate=16000, channels=1, chunk=160)
             self.no_mic = False
         except Exception as e:
             print(f"Microphone init failed ({e}) – joining muted without mic.")
