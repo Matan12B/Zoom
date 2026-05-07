@@ -33,15 +33,15 @@ class CameraControl:
                 self.cam.release()
         except Exception:
             pass
+        # check os for mac support
         system = platform.system()
         if system == "Windows":
             self.cam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        elif system == "Darwin":
-            self.cam = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
         else:
             self.cam = cv2.VideoCapture(0)
         if not self.cam or not self.cam.isOpened():
             self.cam = cv2.VideoCapture(0)
+        # set camera settings
         if self.cam and self.cam.isOpened():
             self.cam.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cam.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
@@ -67,7 +67,7 @@ class CameraControl:
         Pause camera capture. Fully release if pause_only=False.
         """
         self.paused = True
-        # Clear the cached frame immediately so get_frame() returns None
+        # Clear the cached frame immediately so get_frame() returns None so camera wont show stale frames
         # right away and the send loop stops transmitting stale data.
         with self.lock:
             self.last_frame = None
@@ -83,6 +83,11 @@ class CameraControl:
             print("Camera fully stopped.")
 
     def _capture_loop(self):
+        """
+        capture frames from camera
+        also checks if the camera isnt capturing and if it doesnt clears the last frame
+        so no frozen frames will appear
+        """
         while self.running:
             if self.paused:
                 time.sleep(0.02)
@@ -121,6 +126,9 @@ class CameraControl:
                 time.sleep(0.05)
 
     def get_frame(self):
+        """
+        return the last frame from the camera
+        """
         with self.lock:
             result = None
             if self.last_frame is not None and time.time() - self.last_frame_time <= 1.0:
@@ -129,15 +137,13 @@ class CameraControl:
 
     def release(self):
         """
-        Call this only on app exit.
+        release the camera from the program
         """
         self.running = False
-
         try:
             if self.capture_thread is not None:
                 self.capture_thread.join(timeout=1)
         except Exception:
             pass
-
         if self.cam is not None and self.cam.isOpened():
             self.cam.release()

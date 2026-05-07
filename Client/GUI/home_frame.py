@@ -26,14 +26,14 @@ class HomeFrame(wx.Frame):
         panel = wx.Panel(self)
         ui_theme.style_window(self, ui_theme.PALETTE["app_bg"])
         ui_theme.style_window(panel, ui_theme.PALETTE["app_bg"])
-
+        # Top-level vertical sizer for the entire home screen
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
         header = wx.Panel(panel)
         ui_theme.style_window(header, ui_theme.PALETTE["surface"])
-
+        # Horizontal sizer for branding (left) and log out (right)
         header_sizer = wx.BoxSizer(wx.HORIZONTAL)
-
+        # Vertical stack for the "Face2Face" name and user greeting
         brand_wrap = wx.BoxSizer(wx.VERTICAL)
 
         brand = wx.StaticText(header, label="Face2Face")
@@ -61,10 +61,11 @@ class HomeFrame(wx.Frame):
         header_sizer.Add(self.logout_btn, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 24)
 
         header.SetSizer(header_sizer)
-
+        # Container for the central content cards
         content = wx.BoxSizer(wx.VERTICAL)
+        # Horizontal sizer to put "Create" and "Join" cards side-by-side
         card_row = wx.BoxSizer(wx.HORIZONTAL)
-
+        # "New Meeting" card layout
         create_card = wx.Panel(panel)
         ui_theme.style_window(create_card, ui_theme.PALETTE["surface"])
 
@@ -93,7 +94,7 @@ class HomeFrame(wx.Frame):
         create_sizer.AddStretchSpacer()
         create_sizer.Add(self.start_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, card_margin)
         create_card.SetSizer(create_sizer)
-        #join panel
+        # "Join Meeting" card layout
         join_card = wx.Panel(panel)
         ui_theme.style_window(join_card, ui_theme.PALETTE["surface"])
         join_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -122,7 +123,7 @@ class HomeFrame(wx.Frame):
         join_inner.Add(self.join_btn, 0, wx.EXPAND)
         join_sizer.Add(join_inner, 1, wx.EXPAND | wx.ALL, card_margin)
         join_card.SetSizer(join_sizer)
-
+        # "Tips" card layout
         tips_card = wx.Panel(panel)
         ui_theme.style_window(tips_card, ui_theme.PALETTE["surface"])
 

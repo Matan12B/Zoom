@@ -50,6 +50,9 @@ class DB:
         :return:
         """
         salt = os.urandom(16)
+        # pbkdf2_hmac for slow cracking
+        # runs sha 256 100k times
+        # prevents brute force attacks
         hashed = hashlib.pbkdf2_hmac(
             "sha256",
             password.encode(),

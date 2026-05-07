@@ -72,7 +72,6 @@ class CallLogic(CallParticipant):
         """
         Map a raw UDP sender IP to the participant IP used by the GUI/control layer.
         Handles cases where the host's control IP and UDP IP differ.
-
         :param sender_ip: Raw IP from the UDP packet.
         :return: Canonical participant IP string.
         """
@@ -117,7 +116,6 @@ class CallLogic(CallParticipant):
     def _send_video(self, frame, timestamp):
         """
         Queue the frame for the send_loop thread to encode and transmit.
-
         :param frame: Raw OpenCV frame (numpy array).
         :param timestamp: Float timestamp relative to meeting start.
         """

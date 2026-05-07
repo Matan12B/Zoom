@@ -46,33 +46,37 @@ class AudioOutput:
             self.stream = None
 
     def play_bytes(self, audio_bytes):
-        """Play raw int16 bytes, restarting the stream if it has failed."""
-        if audio_bytes:
-            # Lazy init: stream is created here (in the playback thread)
-            if self.stream is None:
+        """Play audio with automatic stream recovery."""
+        if not audio_bytes:
+            return
+        # Ensure hardware is ready (Lazy Init)
+        if self.stream is None:
+            self._open_stream()
+        if self.stream:
+            try:
+                # Process the data
+                audio_data = self._process_audio_data(audio_bytes)
+                # Write to hardware
+                if audio_data.size > 0:
+                    self.stream.write(audio_data)
+            except Exception as e:
+                print(f"Audio error: {e} - Resetting...")
+                self.stop()  # Modular cleanup
                 self._open_stream()
-            if self.stream is not None:
-                try:
-                    raw = np.frombuffer(audio_bytes, dtype=np.int16)
-                    if self._use_float32:
-                        audio_data = raw.astype(np.float32) / 32768.0
-                    else:
-                        audio_data = raw
-                    if self.channels > 1:
-                        trim = (len(audio_data) // self.channels) * self.channels
-                        audio_data = audio_data[:trim].reshape(-1, self.channels)
-                    if len(audio_data) > 0:
-                        self.stream.write(audio_data)
-                except Exception as e:
-                    print(f"AudioOutput play_bytes error: {e} — restarting stream")
-                    try:
-                        self.stream.stop()
-                        self.stream.close()
-                    except Exception:
-                        pass
-                    self.stream = None
-                    self._open_stream()
 
+    def _process_audio_data(self, audio_bytes):
+        """Handles the math and shaping in one clear flow."""
+        # Convert to numpy array
+        data = np.frombuffer(audio_bytes, dtype=np.int16)
+        # Normalize if needed
+        if self._use_float32:
+            data = data.astype(np.float32) / 32768.0
+        # Align and Reshape for channels
+        if self.channels > 1:
+            # The // operator ensures we don't have a partial sample for stereo
+            data = data[:(data.size // self.channels) * self.channels]
+            data = data.reshape(-1, self.channels)
+        return data
     def stop(self):
         """Close stream and release resources."""
         if self.stream:

@@ -191,6 +191,7 @@ class CallFrame(wx.Frame):
         self.SetBackgroundColour(ui_theme.PALETTE["call_bg"])
         self.panel = wx.Panel(self)
         ui_theme.style_window(self.panel, ui_theme.PALETTE["call_bg"], ui_theme.PALETTE["text_inverted"])
+        # Main layout sizer: stacks header, video grid, and controls vertically
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self._build_header(), 0, wx.EXPAND | wx.ALL, 18)
         sizer.Add(self._build_video_grid(), 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 18)
@@ -210,11 +211,13 @@ class CallFrame(wx.Frame):
     def _build_header(self):
         panel = wx.Panel(self.panel)
         ui_theme.style_window(panel, ui_theme.PALETTE["call_surface"], ui_theme.PALETTE["text_inverted"])
+        # Horizontal sizer to split header info between left (title) and right (code)
         hsizer = wx.BoxSizer(wx.HORIZONTAL)
+        # Vertical stack for "Meeting Room" and participant role text
         left = wx.BoxSizer(wx.VERTICAL)
         lbl = wx.StaticText(panel, label="LIVE MEETING")
         title = wx.StaticText(panel, label="Meeting room")
-        role = "Host controls enabled" if self.is_host else "Connected as participant"
+        role = "Host controls enabled" if self.is_host else "Connected as guest"
         self.meeting_meta_text = wx.StaticText(panel, label=role)
         ui_theme.style_text(lbl, ui_theme.PALETTE["surface_alt"], size_delta=1, bold=True)
         ui_theme.style_text(title, ui_theme.PALETTE["text_inverted"], size_delta=10, bold=True)
@@ -224,6 +227,7 @@ class CallFrame(wx.Frame):
         left.Add(self.meeting_meta_text, 0)
         code = getattr(self.call_logic, "meeting_code", "") or "N/A"
         self.meeting_code = code
+        # Vertical stack for the meeting code display and Copy button
         right = wx.BoxSizer(wx.VERTICAL)
         code_lbl = wx.StaticText(panel, label="Meeting code")
         code_val = wx.StaticText(panel, label=code)
@@ -233,12 +237,14 @@ class CallFrame(wx.Frame):
         right.Add(code_lbl, 0, wx.BOTTOM, 6)
         right.Add(code_val, 0, wx.BOTTOM, 10)
         right.Add(self.copy_code_btn, 0, wx.ALIGN_LEFT)
+
         hsizer.Add(left, 1, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 20)
         hsizer.Add(right, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 20)
         panel.SetSizer(hsizer)
         return panel
 
     def _build_video_grid(self):
+        # 2x2 Grid sizer to hold participant video panels
         self.video_grid = wx.GridSizer(2, 2, 12, 12)
         self.video_panels = []
         for _ in range(4):
@@ -250,6 +256,7 @@ class CallFrame(wx.Frame):
     def _build_controls(self):
         panel = wx.Panel(self.panel)
         ui_theme.style_window(panel, ui_theme.PALETTE["call_surface"], ui_theme.PALETTE["call_ctrl_text"])
+        # Horizontal row for Mic, Camera, and Leave buttons
         row = wx.BoxSizer(wx.HORIZONTAL)
         mic_label = "Unmute" if self.is_muted else "Mute"
         cam_label = "Camera On" if self.is_camera_off else "Camera Off"

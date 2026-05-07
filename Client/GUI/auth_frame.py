@@ -6,10 +6,17 @@ import wx.adv
 from Client.GUI.home_frame import HomeFrame
 from Client.GUI import ui_theme
 
+import time
+import wx
+import wx.adv
+from Client.GUI.home_frame import HomeFrame
+from Client.GUI import ui_theme
+
 
 class _BaseAuthFrame(wx.Frame):
     def __init__(self, client, title_suffix, submit_label):
-        super().__init__(None, title=f"Face2Face - {title_suffix}", size=wx.Size(540, 480), style=wx.DEFAULT_FRAME_STYLE & ~wx.RESIZE_BORDER & ~wx.MAXIMIZE_BOX)
+        super().__init__(None, title=f"Face2Face - {title_suffix}", size=wx.Size(540, 480),
+                         style=wx.DEFAULT_FRAME_STYLE & ~wx.RESIZE_BORDER & ~wx.MAXIMIZE_BOX)
         self.client = client
         self.submit_label = submit_label
         self._auth_wait_deadline = 0.0
@@ -22,18 +29,21 @@ class _BaseAuthFrame(wx.Frame):
         ui_theme.style_window(self, ui_theme.PALETTE["app_bg"])
         ui_theme.style_window(root, ui_theme.PALETTE["app_bg"])
 
+        # Main vertical sizer that centers the auth card on the screen
         outer = wx.BoxSizer(wx.VERTICAL)
-        outer.AddStretchSpacer()
+        outer.AddStretchSpacer()  # Push content to center
 
         title = wx.StaticText(root, label="Face2Face")
         ui_theme.style_text(title, ui_theme.PALETTE["primary"], size_delta=14, bold=True)
         outer.Add(title, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.BOTTOM, 18)
 
+        # White "card" panel to hold input fields
         auth_card = wx.Panel(root)
         ui_theme.style_window(auth_card, ui_theme.PALETTE["surface"])
         auth_card.SetMinSize(wx.Size(420, -1))
         auth_card.SetMaxSize(wx.Size(420, -1))
 
+        # Vertical sizer for everything inside the white card
         auth_sizer = wx.BoxSizer(wx.VERTICAL)
         margin = 24
 
@@ -47,25 +57,24 @@ class _BaseAuthFrame(wx.Frame):
         ui_theme.style_text_input(self.username_box, "Username")
         ui_theme.style_text_input(self.password_box, "Password")
 
-        self.submit_btn = ui_theme.create_button(
-            auth_card,
-            self.submit_label,
-            kind="primary",
-            min_height=48
-        )
+        self.submit_btn = ui_theme.create_button(auth_card, self.submit_label, kind="primary", min_height=48)
 
         self.status_panel = wx.Panel(auth_card)
         self.status_text = wx.StaticText(self.status_panel, label="")
+
+        # Sizer for the status message to give it internal padding
         status_sizer = wx.BoxSizer(wx.VERTICAL)
         status_sizer.Add(self.status_text, 0, wx.ALL | wx.EXPAND, 10)
         self.status_panel.SetSizer(status_sizer)
 
+        # Groups the text inputs and their labels vertically
         fields = wx.BoxSizer(wx.VERTICAL)
         fields.Add(username_label, 0, wx.BOTTOM, 6)
         fields.Add(self.username_box, 0, wx.EXPAND | wx.BOTTOM, 14)
         fields.Add(password_label, 0, wx.BOTTOM, 6)
         fields.Add(self.password_box, 0, wx.EXPAND | wx.BOTTOM, 18)
 
+        # Combine all parts into the main card sizer
         auth_sizer.Add(fields, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, margin)
         self._add_extra_fields(auth_card, auth_sizer)
         auth_sizer.Add(self.submit_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, margin)
@@ -74,9 +83,8 @@ class _BaseAuthFrame(wx.Frame):
         auth_card.SetSizer(auth_sizer)
 
         outer.Add(auth_card, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.LEFT | wx.RIGHT, 40)
-        outer.AddStretchSpacer()
+        outer.AddStretchSpacer()  # Push content to center
         root.SetSizer(outer)
-
         self._set_status("Welcome to Face2Face.", "neutral")
 
     def _bind_common_events(self):

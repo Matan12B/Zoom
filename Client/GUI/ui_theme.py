@@ -1,7 +1,7 @@
 import wx
 import wx.adv
 
-
+# Dictionary containing the color hex codes for the app's theme
 PALETTE = {
     "app_bg": wx.Colour(244, 247, 251),
     "surface": wx.Colour(255, 255, 255),

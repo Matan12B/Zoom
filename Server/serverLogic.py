@@ -98,9 +98,9 @@ class Server:
         else:
             raise RuntimeError("Could not allocate a unique meeting code")
         shared_key = self.generate_shared_key()
-        # Store meeting: [call_id] = [port, shared_key, [list of client IPs], host]
+        # Store meeting: [call_id] = [port, shared_key, [list of client IPs], host_ip]
         meeting_port = self.generate_port()
-        self.meetings[meeting_id] = [meeting_port, shared_key, [ip], ip]
+        self.meetings[meeting_id] = [meeting_port, shared_key, [ip]]
         # Update client's meeting ID
         if ip in self.open_clients:
             self.open_clients[ip][1] = meeting_id
@@ -122,12 +122,14 @@ class Server:
         meeting_id = data[0]
         if meeting_id in self.meetings:
             participants = self.meetings[meeting_id][2]
+            # check if meeting is full and notify the client
             if len(participants) >= self.MAX_MEETING_SIZE:
                 print(f"Meeting {meeting_id} is full ({self.MAX_MEETING_SIZE} participants). Rejecting {ip}")
                 msg = serverProtocol.build_error("Meeting is full")
                 self.comm.send_msg(ip, msg)
             else:
                 meeting_port = self.meetings[meeting_id][0]
+                # the shared cipher key for the meeting
                 shared_key = self.meetings[meeting_id][1]
                 username = data[1]
                 participants.append(ip)
@@ -139,11 +141,12 @@ class Server:
 
                 if ip in self.open_clients:
                     self.open_clients[ip][1] = meeting_id
-
-                give_role = serverProtocol.build_give_role("guest", meeting_port, shared_key, self.meetings[meeting_id][3])
+                # the host ip is always first in the list of clients self.meetings[meeting_id][2][0]
+                give_role = serverProtocol.build_give_role("guest", meeting_port, shared_key,
+                                                           self.meetings[meeting_id][2][0])
                 self.comm.send_msg(ip, give_role)
                 print("sending role")
-
+                # share with the client all clients connected to the meeting if they exist
                 give_existing_clients = serverProtocol.build_clients_connected(existing_clients)
                 self.comm.send_msg(ip, give_existing_clients)
 
@@ -201,7 +204,7 @@ class Server:
         """
         meeting_id = data
 
-        if meeting_id in self.meetings.keys() and self.meetings[meeting_id][3] == ip:
+        if meeting_id in self.meetings.keys() and self.meetings[meeting_id][2][0] == ip:
             self.close_meeting(ip, meeting_id)
         elif ip in self.open_clients:
             username = self.open_clients[ip][0]
@@ -291,14 +294,11 @@ def main():
     server_ip, server_port, video_port, audio_port, dh_p, dh_g = load_settings()
     server = Server(port=server_port, dh_p=dh_p, dh_g=dh_g)
     server.start()
-
     # Keep main thread alive
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nServer shutting down...")
-
-
 if __name__ == "__main__":
     main()
