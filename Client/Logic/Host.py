@@ -37,8 +37,9 @@ class Host(CallParticipant):
         self.msgQ = queue.Queue()
         self.host_server = ClientServer(port, self.msgQ, self.open_clients, self.AES)
         self.audio_comm = AudioServer(port=audio_port, AES=self.AES, open_clients=self.open_clients)
-        self.screen_capture = ScreenCaptureControl(max_width=1280, max_height=720, fps=12)
-        self.screen_share_send_interval = 1 / 12.0
+        self.screen_capture_fps = 60
+        self.screen_capture = ScreenCaptureControl(max_width=1280, max_height=720, fps=self.screen_capture_fps)
+        self.screen_share_send_interval = 1 / float(self.screen_capture_fps)
         self.last_screen_share_send_time = 0
         self.last_screen_share_error = ""
 
@@ -169,8 +170,9 @@ class Host(CallParticipant):
                     time.sleep(0.05)
                     continue
                 now = time.time()
-                if now - self.last_screen_share_send_time < self.screen_share_send_interval:
-                    time.sleep(0.01)
+                remaining = self.screen_share_send_interval - (now - self.last_screen_share_send_time)
+                if remaining > 0:
+                    time.sleep(min(0.002, remaining))
                     continue
                 frame = self.screen_capture.get_frame()
                 if frame is None:

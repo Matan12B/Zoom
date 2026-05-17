@@ -225,7 +225,7 @@ class CallFrame(wx.Frame):
             vp.clear_panel()
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._on_timer, self.timer)
-        self.timer.Start(1000 // 24)
+        self.timer.Start(1000 // 60)
         threading.Thread(target=self._run_call, daemon=True).start()
         self.Center()
 
