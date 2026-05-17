@@ -1,5 +1,7 @@
 import struct
 import json
+import time
+import base64
 
 def unpack(msg):
     """
@@ -10,6 +12,9 @@ def unpack(msg):
     data = split[1:]
     if opcode == "cc" and data:
         result = json.loads(data[0])
+    elif opcode == "tc" and data:
+        payload = base64.b64decode(data[0].encode()).decode()
+        result = json.loads(payload)
     elif len(data) == 1:
         result = data[0]
     else:
@@ -27,6 +32,13 @@ def build_connected_clients(clients_dict):
     build connected clients dict msg
     """
     return f"cc^#^{json.dumps(clients_dict)}"
+
+
+def build_client_identity(client_id):
+    """
+    Identify this guest to the host-side meeting TCP server.
+    """
+    return f"ci^#^{client_id}"
 
 def unpack_file(msg):
     """
@@ -100,12 +112,36 @@ def build_camera_state(ip, is_on):
     """
     return f"cs^#^{ip}^#^{1 if is_on else 0}"
 
+
+def build_screen_share_state(ip, is_on):
+    """
+    Signal that a participant started or stopped sharing their screen.
+    is_on=True -> "1", is_on=False -> "0"
+    """
+    return f"ss^#^{ip}^#^{1 if is_on else 0}"
+
 def build_toggle_mic(ip, muted):
     """
     Broadcast mic mute state.
     muted: bool — True = muted, False = unmuted
     """
     return f"tm^#^{ip}^#^{1 if muted else 0}"
+
+
+def build_chat_message(sender_ip, username, text, timestamp=None):
+    """
+    Build a text-chat message for the meeting control channel.
+    The payload is JSON so chat text can safely contain protocol separators.
+    """
+    payload = {
+        "sender_ip": sender_ip or "",
+        "username": username or "",
+        "text": text or "",
+        "timestamp": time.time() if timestamp is None else timestamp,
+    }
+    payload_json = json.dumps(payload)
+    payload_b64 = base64.b64encode(payload_json.encode()).decode()
+    return f"tc^#^{payload_b64}"
 
 def build_leave_meeting(meeting_code):
     """

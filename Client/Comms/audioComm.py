@@ -208,7 +208,7 @@ class AudioServer:
                     try:
                         client_socket, addr = self.server_socket.accept()
                         client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                        client_ip = addr[0]
+                        client_ip = f"{addr[0]}:{addr[1]}"
                         self.audio_clients[client_ip] = client_socket
                         self.socket_to_ip[client_socket] = client_ip
                         self._send_locks[client_ip] = threading.Lock()
@@ -235,6 +235,10 @@ class AudioServer:
                         audio, header = clientProtocol.unpack_file(decrypt_audio_chunk)
                         if len(header) == 3:
                             timestamp = float(header[1])
+                            sender_id = header[2]
+                            if sender_id and sender_id != client_ip:
+                                self._assign_client_id(current_socket, client_ip, sender_id)
+                                client_ip = sender_id
                             self.audio_queue.put((audio, timestamp, client_ip))
                         else:
                             print("incorrect audio msg header on server")
@@ -317,6 +321,19 @@ class AudioServer:
                 print(f"Audio client {client_ip} closed.")
             except Exception as e:
                 print(f"error closing audio client {client_ip}: {e}")
+
+    def _assign_client_id(self, client_socket, old_id, new_id):
+        """
+        Re-key an accepted audio socket from temporary ip:port to participant id.
+        """
+        if not new_id:
+            return
+        self.audio_clients[new_id] = client_socket
+        self.socket_to_ip[client_socket] = new_id
+        self._send_locks[new_id] = self._send_locks.get(old_id) or threading.Lock()
+        if old_id != new_id:
+            self.audio_clients.pop(old_id, None)
+            self._send_locks.pop(old_id, None)
 
     def close(self):
         """

@@ -39,11 +39,11 @@ def build_audio_msg(audio_data):
     """
     return f"ha^#^{audio_data}"
 
-def build_give_role(role, meeting_port, shared_key, host_ip=""):
+def build_give_role(role, meeting_port, shared_key, host_ip="", client_id="", host_id=""):
     """
     give the client a role
     """
-    return f"ir^#^{role}^#^{meeting_port}^#^{shared_key}^#^{host_ip}"
+    return f"ir^#^{role}^#^{meeting_port}^#^{shared_key}^#^{host_ip}^#^{client_id}^#^{host_id}"
 
 def build_give_meeting_code(meeting_code):
     """
@@ -57,11 +57,11 @@ def build_start_meeting():
     """
     return f"sm^#^"
 
-def build_client_joined(ip, port, shared_key, username):
+def build_client_joined(ip, port, shared_key, username, client_address=""):
     """
     build msg with data about client
     """
-    return f"hj^#^{ip}^#^{port}^#^{shared_key}^#^{username}"
+    return f"hj^#^{ip}^#^{port}^#^{shared_key}^#^{username}^#^{client_address}"
 
 def build_meeting_closed():
     """

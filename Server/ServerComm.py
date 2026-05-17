@@ -11,12 +11,13 @@ class ServerComm:
         self.recvQ = recvQ
         self.dh_p = dh_p
         self.dh_g = dh_g
-        # ip: [soc, AES]
+        # client_id: [soc, AES]
         self.open_clients= {}
-        # soc: ip
+        # soc: client_id
         self.open_clients_soc_ip = {}
+        self.client_addresses = {}
         self.server_socket.bind(('0.0.0.0', self.port))
-        self.server_socket.listen(4)
+        self.server_socket.listen(32)
         threading.Thread(target=self._mainLoop,).start()
 
     def _recv_exact(self, sock, size):
@@ -52,8 +53,10 @@ class ServerComm:
             for current_socket in rlist:
                 if current_socket is self.server_socket:
                     client_socket, addr = self.server_socket.accept()
-                    print(f"{addr[0]} connected")
-                    threading.Thread(target=self._exchange_key, args=(client_socket, addr[0],)).start()
+                    client_id = f"{addr[0]}:{addr[1]}"
+                    self.client_addresses[client_id] = addr[0]
+                    print(f"{client_id} connected")
+                    threading.Thread(target=self._exchange_key, args=(client_socket, client_id,)).start()
                 else:
                     if current_socket in self.open_clients_soc_ip.keys():
                         decrypt_msg = ""
@@ -117,6 +120,7 @@ class ServerComm:
                 # Safely remove from dictionaries without throwing KeyErrors
                 self.open_clients_soc_ip.pop(client_soc, None)
                 self.open_clients.pop(client_ip, None)
+                self.client_addresses.pop(client_ip, None)
                 client_soc.close()
                 print(f"Client {client_ip} closed.")
                 # Notify serverLogic so it can tear down any meeting this client owned
@@ -147,6 +151,12 @@ class ServerComm:
         if client_ip in self.open_clients.keys():
             soc = self._find_socket_by_ip(client_ip)
             self._send_msg(soc, msg)
+
+    def get_client_address(self, client_ip):
+        """
+        Return the network address for a signaling client id.
+        """
+        return self.client_addresses.get(client_ip, client_ip.split(":")[0])
 
     def broadcast(self, msg):
         """

@@ -58,7 +58,7 @@ class VideoComm:
                 decrypted_packet = self.AES.decrypt_file(data)
                 sender_ip = addr[0]
                 reassembler = self._get_reassembler(sender_ip)
-                frame, timestamp = reassembler.handle_packet(decrypted_packet)
+                frame, timestamp, stream_type = reassembler.handle_packet(decrypted_packet)
                 if frame is not None:
                     # Allow enough room for all connected clients (at least 20 frames)
                     max_queued = max(20, len(self.open_clients) * 4)
@@ -67,7 +67,7 @@ class VideoComm:
                             self.frameQ.get_nowait()
                         except queue.Empty:
                             break
-                    self.frameQ.put((frame, timestamp, addr))
+                    self.frameQ.put((frame, timestamp, addr, stream_type))
                 now = time.time()
                 if now - self.last_cleanup > 0.2:
                     self.last_cleanup = now
@@ -78,7 +78,7 @@ class VideoComm:
             except Exception as e:
                 print("Receive error:", e)
 
-    def send_frame(self, frame_bytes, timestamp):
+    def send_frame(self, frame_bytes, timestamp, stream_type="camera"):
         """
         Send encoded JPEG bytes to all open clients using many small UDP packets.
         Each packet is encrypted exactly once; the same ciphertext is sent to every
@@ -91,12 +91,21 @@ class VideoComm:
         if frame_bytes:
             try:
                 frame_id = self._next_frame_id()
-                packets = frameAssembler.FrameReassembler.split_frame_to_packets(frame_id, timestamp, frame_bytes)
+                packets = frameAssembler.FrameReassembler.split_frame_to_packets(
+                    frame_id,
+                    timestamp,
+                    frame_bytes,
+                    stream_type=stream_type
+                )
             except Exception as e:
                 print("split frame error:", e)
                 packets = None
             if packets is not None:
-                clients = [ip for ip in list(self.open_clients.keys()) if ip]
+                clients = []
+                for client_id, value in list(self.open_clients.items()):
+                    address = self._client_address(client_id, value)
+                    if address:
+                        clients.append((client_id, address))
                 if clients:
                     # Encrypt once per packet, broadcast same bytes to every client
                     for packet in packets:
@@ -105,11 +114,21 @@ class VideoComm:
                         except Exception as e:
                             print("encrypt packet error:", e)
                             break
-                        for ip in clients:
+                        for client_id, address in clients:
                             try:
-                                self.udp_socket.sendto(encrypted_packet, (ip, self.port))
+                                self.udp_socket.sendto(encrypted_packet, (address, self.port))
                             except Exception as e:
-                                print(f"send frame error to {ip}:", e)
+                                print(f"send frame error to {client_id}:", e)
+
+    def _client_address(self, client_id, value):
+        """
+        Resolve a participant key to the network address used for UDP delivery.
+        """
+        if isinstance(value, dict):
+            return value.get("address") or client_id.split(":")[0]
+        if isinstance(value, list) and len(value) >= 5 and value[4]:
+            return value[4]
+        return client_id.split(":")[0] if client_id else ""
 
     def remove_user(self, user_ip, user_port):
         """

@@ -3,6 +3,7 @@ import threading
 import queue
 import select
 from Common.Cipher import DiffiHelman, AESCipher
+from Client.Protocol import clientProtocol
 
 class ClientServer:
     def __init__(self, port, recvQ, open_clients, meeting_AES):
@@ -56,11 +57,13 @@ class ClientServer:
             for current_socket in rlist:
                 if current_socket is self.server_socket:
                     client_socket, addr = self.server_socket.accept()
-                    print(f"{addr[0]} connected to client server")
-                    if addr[0] not in self.open_clients:
-                        self.open_clients[addr[0]] = [None, None]
-                    self.open_clients[addr[0]][0] = client_socket
-                    self.open_clients_soc_ip[client_socket] = addr[0]
+                    temp_id = f"{addr[0]}:{addr[1]}"
+                    print(f"{temp_id} connected to client server")
+                    if temp_id not in self.open_clients:
+                        self.open_clients[temp_id] = [client_socket, None]
+                    else:
+                        self.open_clients[temp_id][0] = client_socket
+                    self.open_clients_soc_ip[client_socket] = temp_id
                 else:
                     if current_socket in self.open_clients_soc_ip.keys():
                         decrypt_msg = ""
@@ -81,7 +84,34 @@ class ClientServer:
                             self.close_client(current_ip)
                             continue
                         if decrypt_msg:
+                            try:
+                                opcode, data = clientProtocol.unpack(decrypt_msg)
+                            except Exception:
+                                opcode, data = "", None
+                            if opcode == "ci":
+                                self._assign_client_id(current_socket, current_ip, data)
+                                continue
                             self.recvQ.put([current_ip, decrypt_msg])
+
+    def _assign_client_id(self, client_socket, old_id, new_id):
+        """
+        Replace the temporary TCP address key with the participant id assigned by signaling.
+        """
+        if not new_id:
+            return
+        existing = self.open_clients.get(new_id)
+        if isinstance(existing, list):
+            if existing:
+                existing[0] = client_socket
+            else:
+                self.open_clients[new_id] = [client_socket]
+        else:
+            self.open_clients[new_id] = [client_socket, None]
+        if old_id and old_id != new_id:
+            old_entry = self.open_clients.get(old_id)
+            if isinstance(old_entry, list) and old_entry and old_entry[0] is client_socket:
+                self.open_clients.pop(old_id, None)
+        self.open_clients_soc_ip[client_socket] = new_id
 
     def close_client(self, client_ip, notify=True):
         """Closes the client connection safely and optionally notifies the host."""

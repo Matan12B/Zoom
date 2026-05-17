@@ -1,5 +1,6 @@
 import wx
 import wx.adv
+import wx.lib.buttons as wx_buttons
 
 
 PALETTE = {
@@ -85,7 +86,12 @@ def create_button(parent, label, kind="primary", min_height=44, min_width=-1):
     :param min_width: Minimum width
     :return: The created and styled button
     """
-    button = wx.Button(parent, label=label)
+    if kind in ("call", "call_active", "call_danger"):
+        button = wx_buttons.GenButton(parent, label=label)
+        if hasattr(button, "SetBezelWidth"):
+            button.SetBezelWidth(0)
+    else:
+        button = wx.Button(parent, label=label)
     return style_button(button, kind=kind, min_height=min_height, min_width=min_width)
 
 
@@ -115,10 +121,13 @@ def style_button(button, kind="primary", min_height=44, min_width=-1):
         button.SetInitialSize(wx.Size(min_width, min_height))
     button.SetBackgroundColour(bg)
     button.SetForegroundColour(fg)
+    if hasattr(button, "SetLabelColour"):
+        button.SetLabelColour(fg)
     style_text(button, fg, bold=True)
     font = button.GetFont()
     font.SetWeight(wx.FONTWEIGHT_BOLD)
     button.SetFont(font)
+    button.Refresh()
     return button
 
 

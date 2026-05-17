@@ -10,7 +10,7 @@ from Client.Logic.callParticipant import CallParticipant
 
 class CallLogic(CallParticipant):
     def __init__(self, port, meeting_key, comm, host_ip, meeting_code, username="",
-                 video_port=5000, audio_port=3000):
+                 video_port=5000, audio_port=3000, participant_id=None, host_id=None):
         """
         Initialize the guest participant: shared devices via parent, plus
         an AudioClient and ClientComm to communicate with the host.
@@ -30,15 +30,17 @@ class CallLogic(CallParticipant):
             username=username,
             fallback_target_ip=host_ip,
             playout_delay=0.04,
-            video_port=video_port
+            video_port=video_port,
+            participant_id=participant_id
         )
         self.msgs_from_host = queue.Queue()
         self.comm_with_host = ClientComm(host_ip, port, self.msgs_from_host, self.AES)
-        self.host_ip = host_ip
+        self.host_address = host_ip
+        self.host_ip = host_id or host_ip
         self.host_video_ip = None
         self.audio_comm = AudioClient(host_ip, self.AES, audio_port)
         # host is always known from the start; starts muted
-        self.open_clients[self.host_ip] = {"username": "Host", "muted": True}
+        self.open_clients[self.host_ip] = {"username": "Host", "muted": True, "address": host_ip}
         self.send_queue = queue.Queue(maxsize=1)
         # some commands are in the parent class
         self.commands = {
@@ -52,6 +54,8 @@ class CallLogic(CallParticipant):
             "cc": self.get_connected_clients,
             "tm": self.handle_mic_status,
             "cs": self.handle_camera_state,
+            "tc": self.handle_chat_message,
+            "ss": self.handle_screen_share_state,
         }
 
     def _resolve_video_sender(self, addr):
@@ -77,7 +81,9 @@ class CallLogic(CallParticipant):
         :return: Canonical participant IP string.
         """
         result = sender_ip
-        if sender_ip == self.ip:
+        if sender_ip == self.host_address:
+            result = self.host_ip
+        elif sender_ip == self.ip:
             result = self.ip
         elif sender_ip in self.open_clients:
             result = sender_ip
@@ -103,6 +109,10 @@ class CallLogic(CallParticipant):
             raise ConnectionError("Timed out connecting to host")
         if getattr(self.comm_with_host, "error", ""):
             raise ConnectionError(self.comm_with_host.error)
+        try:
+            self.comm_with_host.send_msg(clientProtocol.build_client_identity(self.participant_id))
+        except Exception as e:
+            print("client identity send error:", e)
 
     def _start_threads(self):
         """
@@ -162,7 +172,7 @@ class CallLogic(CallParticipant):
                 if not audio_chunk:
                     continue
                 timestamp = time.time() - self.meeting_start_time
-                msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
+                msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.participant_id)
                 self.audio_comm.send_audio(msg)
             except Exception as e:
                 print("audio_send_loop error:", e)
@@ -183,7 +193,7 @@ class CallLogic(CallParticipant):
 
                     sender_ip = self._canonical_sender_ip(sender_ip)
 
-                    if sender_ip == self.ip:
+                    if sender_ip == self.participant_id or sender_ip == self.ip:
                         continue
 
                     if sender_ip not in self.open_clients:
@@ -275,8 +285,15 @@ class CallLogic(CallParticipant):
         """
         if isinstance(connected_clients, dict):
             for ip, username in connected_clients.items():
-                if ip != self.ip and ip != self.host_ip:
-                    self.open_clients[ip] = {"username": username, "muted": True}
+                if ip != self.participant_id and ip != self.ip and ip != self.host_ip:
+                    if isinstance(username, dict):
+                        self.open_clients[ip] = {
+                            "username": username.get("username", ip),
+                            "muted": True,
+                            "address": username.get("address", ip.split(":")[0]),
+                        }
+                    else:
+                        self.open_clients[ip] = {"username": username, "muted": True, "address": ip.split(":")[0]}
 
     def handle_video_msg(self, data):
         """
@@ -313,11 +330,12 @@ class CallLogic(CallParticipant):
         try:
             ip = data[0]
             username = data[3]
+            address = data[4] if len(data) > 4 else ip.split(":")[0]
         except Exception as e:
             print("join parse error:", e)
             return
-        if ip != self.ip:
-            self.open_clients[ip] = {"username": username, "muted": True}
+        if ip != self.participant_id and ip != self.ip:
+            self.open_clients[ip] = {"username": username, "muted": True, "address": address}
 
     def handle_mic_status(self, data):
         """
@@ -343,7 +361,7 @@ class CallLogic(CallParticipant):
         :param muted: bool
         """
         try:
-            msg = clientProtocol.build_toggle_mic(self.ip, muted)
+            msg = clientProtocol.build_toggle_mic(self.participant_id, muted)
             self.comm_with_host.send_msg(msg)
         except Exception as e:
             print("broadcast_mic_status error:", e)
@@ -358,10 +376,28 @@ class CallLogic(CallParticipant):
         The host will relay it to all other guests.
         """
         try:
-            msg = clientProtocol.build_camera_state(self.ip, is_on)
+            msg = clientProtocol.build_camera_state(self.participant_id, is_on)
             self.comm_with_host.send_msg(msg)
         except Exception as e:
             print("notify_camera_state error:", e)
+
+    def send_chat_message(self, text):
+        """
+        Send a chat message to the host for relay to the meeting.
+        """
+        text = (text or "").strip()
+        if not text:
+            return False
+        timestamp = time.time()
+        try:
+            msg = clientProtocol.build_chat_message(self.participant_id, self.username, text, timestamp)
+            sent = self.comm_with_host.send_msg(msg)
+            if sent:
+                self._queue_chat_message(self.participant_id, self.username or "You", text, timestamp)
+            return sent
+        except Exception as e:
+            print("send_chat_message error:", e)
+            return False
 
     def force_disconnect(self, data=None):
         """

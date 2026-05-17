@@ -10,7 +10,7 @@ from string import ascii_uppercase
 import random
 
 class Server:
-    MAX_MEETING_SIZE = 4
+    MAX_MEETING_SIZE = 18
 
     def __init__(self, port=1231, dh_p=797, dh_g=100):
         self.port = port
@@ -19,9 +19,9 @@ class Server:
         self.msgsQ = queue.Queue()
         self.comm = ServerComm(self.port, self.msgsQ, self.dh_p, self.dh_g)
         self.db = DB()
-        # [ip] = [username, call_id]
+        # [client_id] = [username, call_id]
         self.open_clients = {}
-        # [call_id] = [call_key, list_of_clients, host_ip]
+        # [call_id] = [meeting_port, shared_key, list_of_client_ids, host_id]
         self.meetings = {}
         # Command handlers
         self.commands = {
@@ -109,7 +109,8 @@ class Server:
         msg = serverProtocol.build_give_meeting_code(meeting_id)
         print("sending meeting code", meeting_id)
         self.comm.send_msg(ip, msg)
-        msg = serverProtocol.build_give_role("host", meeting_port, shared_key)
+        host_address = self.comm.get_client_address(ip)
+        msg = serverProtocol.build_give_role("host", meeting_port, shared_key, host_address, ip, ip)
         self.comm.send_msg(ip, msg)
 
     def join_meeting(self, ip, data):
@@ -134,13 +135,18 @@ class Server:
                 existing_clients = {}
                 for oc_ip in self.open_clients.keys():
                     if self.open_clients[oc_ip][1] == meeting_id:
-                        existing_clients[oc_ip] = self.open_clients[oc_ip][0]
+                        existing_clients[oc_ip] = {
+                            "username": self.open_clients[oc_ip][0],
+                            "address": self.comm.get_client_address(oc_ip),
+                        }
                 print(f"Client {ip} joined meeting {meeting_id}")
 
                 if ip in self.open_clients:
                     self.open_clients[ip][1] = meeting_id
 
-                give_role = serverProtocol.build_give_role("guest", meeting_port, shared_key, self.meetings[meeting_id][3])
+                host_id = self.meetings[meeting_id][3]
+                host_address = self.comm.get_client_address(host_id)
+                give_role = serverProtocol.build_give_role("guest", meeting_port, shared_key, host_address, ip, host_id)
                 self.comm.send_msg(ip, give_role)
                 print("sending role")
 
@@ -150,7 +156,13 @@ class Server:
                 for other_ip in existing_clients:
                     if other_ip == ip:
                         continue
-                    notify_existing = serverProtocol.build_client_joined(ip, meeting_port, shared_key, username)
+                    notify_existing = serverProtocol.build_client_joined(
+                        ip,
+                        meeting_port,
+                        shared_key,
+                        username,
+                        self.comm.get_client_address(ip)
+                    )
                     self.comm.send_msg(other_ip, notify_existing)
         else:
             print(f"Meeting {meeting_id} not found for client {ip}")

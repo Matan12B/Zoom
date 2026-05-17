@@ -20,6 +20,7 @@ class Client:
         self.role = None
         self.username = ""
         self.password = ""
+        self.client_id = ""
         self.meeting_code = None
         self.active = None
         self.last_error = None
@@ -74,6 +75,9 @@ class Client:
         role = data[0]
         port = int(data[1])
         meeting_key = data[2]
+        host_address = data[3] if len(data) > 3 else ""
+        self.client_id = data[4] if len(data) > 4 else ""
+        host_id = data[5] if len(data) > 5 else host_address
 
         if role == "host":
             self.role = Host(
@@ -83,19 +87,21 @@ class Client:
                 self.meeting_code,
                 self.username,
                 video_port=self.video_port,
-                audio_port=self.audio_port
+                audio_port=self.audio_port,
+                participant_id=self.client_id
             )
-        elif role == "guest" and len(data) == 4:
-            host_ip = data[3]
+        elif role == "guest" and len(data) >= 4:
             self.role = CallLogic(
                 port,
                 meeting_key,
                 self.comm,
-                host_ip,
+                host_address,
                 self.meeting_code,
                 self.username,
                 video_port=self.video_port,
-                audio_port=self.audio_port
+                audio_port=self.audio_port,
+                participant_id=self.client_id,
+                host_id=host_id
             )
         else:
             print("Invalid role")
@@ -179,6 +185,7 @@ class Client:
         """
         self.role = None
         self.meeting_code = None
+        self.client_id = ""
         self.active = None
         try:
             if getattr(self.comm, "running", False) and self.comm.cipher:

@@ -57,7 +57,8 @@ class CallParticipant:
     """
 
     def __init__(self, meeting_key, comm, meeting_code, username,
-                 fallback_target_ip="8.8.8.8", playout_delay=0.03, video_port=5000):
+                 fallback_target_ip="8.8.8.8", playout_delay=0.03, video_port=5000,
+                 participant_id=None):
         """
         Initialize shared call state, devices, and media pipeline.
 
@@ -77,10 +78,20 @@ class CallParticipant:
         self.ip = get_ip_by_interface("Ethernet 4")
         if not self.ip:
             self.ip = get_fallback_ip(fallback_target_ip)
+        self.network_ip = self.ip
+        self.participant_id = participant_id or self.ip
         print(f"Local IP: {self.ip}")
         self.UI_queue = queue.Queue()
+        self.chat_queue = queue.Queue()
+        self.screen_share_queue = queue.Queue()
         self.remote_video_queue = queue.Queue()
         self.latest_remote_frames = {}
+        self.latest_screen_frame = None
+        self.last_screen_received_time = 0
+        self.screen_share_active = False
+        self.screen_share_owner_ip = None
+        self.screen_share_blocked_owner_ip = None
+        self.screen_share_block_until = 0
         # Tracks when the last real video frame arrived from each sender over the network.
         # Used to detect camera-off: if no frame arrives for >VIDEO_TIMEOUT seconds the
         # GUI shows a black placeholder instead of the frozen last frame.
@@ -215,6 +226,87 @@ class CallParticipant:
         """
         pass
 
+    def send_chat_message(self, text):
+        """
+        Send a text-chat message to meeting peers.
+        Overridden by Host and CallLogic with the appropriate transport.
+        """
+        pass
+
+    def toggle_screen_share(self, is_sharing):
+        """
+        Start or stop screen sharing.
+        Overridden by Host; guests do not publish screen share in this version.
+        """
+        return False
+
+    def handle_screen_share_state(self, data):
+        """
+        A participant started or stopped screen sharing.
+        """
+        try:
+            owner_ip = data[0] if isinstance(data, list) else data
+            is_on = bool(int(data[1])) if isinstance(data, list) and len(data) > 1 else False
+        except Exception as e:
+            print("handle_screen_share_state parse error:", e)
+            return
+        self.screen_share_active = is_on
+        self.screen_share_owner_ip = owner_ip if is_on else None
+        if is_on:
+            self.screen_share_blocked_owner_ip = None
+            self.screen_share_block_until = 0
+        if not is_on:
+            self.latest_screen_frame = None
+            self.last_screen_received_time = 0
+            self.screen_share_blocked_owner_ip = owner_ip
+            self.screen_share_block_until = time.monotonic() + 1.5
+            while not self.screen_share_queue.empty():
+                try:
+                    self.screen_share_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+    def _display_name_for_ip(self, ip):
+        """
+        Return a participant display name from the local participant table.
+        """
+        if ip == self.participant_id or ip == self.ip:
+            return self.username or "You"
+        value = self.open_clients.get(ip)
+        if isinstance(value, dict):
+            return value.get("username") or ip
+        if isinstance(value, list) and len(value) >= 3:
+            return value[2] or ip
+        if isinstance(value, str):
+            return value
+        return ip or "Unknown"
+
+    def _queue_chat_message(self, sender_ip, username, text, timestamp=None):
+        """
+        Add a chat message to the UI queue after basic validation.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        self.chat_queue.put({
+            "sender_ip": sender_ip or "",
+            "username": username or self._display_name_for_ip(sender_ip),
+            "text": text,
+            "timestamp": timestamp or time.time(),
+        })
+
+    def handle_chat_message(self, data):
+        """
+        Handle a text-chat payload received over the meeting control channel.
+        """
+        if not isinstance(data, dict):
+            return
+        sender_ip = data.get("sender_ip", "")
+        username = data.get("username") or self._display_name_for_ip(sender_ip)
+        text = data.get("text", "")
+        timestamp = data.get("timestamp")
+        self._queue_chat_message(sender_ip, username, text, timestamp)
+
     def handle_camera_state(self, data):
         """
         A remote participant changed their camera state.
@@ -275,16 +367,39 @@ class CallParticipant:
             try:
                 while not self.video_comm.frameQ.empty():
                     try:
-                        video_data, timestamp, addr = self.video_comm.frameQ.get_nowait()
+                        item = self.video_comm.frameQ.get_nowait()
                     except queue.Empty:
                         break
+                    if len(item) == 4:
+                        video_data, timestamp, addr, stream_type = item
+                    else:
+                        video_data, timestamp, addr = item
+                        stream_type = "camera"
                     sender_ip = self._resolve_video_sender(addr)
                     if sender_ip is None:
                         continue
-                    if sender_ip not in self.open_clients:
-                        self.open_clients[sender_ip] = self._default_client_entry(sender_ip)
                     if video_data is None:
                         continue
+                    if stream_type == "screen":
+                        now = time.monotonic()
+                        if (
+                            sender_ip == self.screen_share_blocked_owner_ip
+                            and now < self.screen_share_block_until
+                        ):
+                            continue
+                        self.screen_share_active = True
+                        self.screen_share_owner_ip = sender_ip
+                        self.latest_screen_frame = video_data
+                        self.last_screen_received_time = now
+                        while self.screen_share_queue.qsize() >= 2:
+                            try:
+                                self.screen_share_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                        self.screen_share_queue.put((sender_ip, video_data))
+                        continue
+                    if sender_ip not in self.open_clients:
+                        self.open_clients[sender_ip] = self._default_client_entry(sender_ip)
                     self.av_sync.add_video(sender_ip, float(timestamp), video_data)
                     self.last_video_received_time[sender_ip] = time.monotonic()
                 time.sleep(0.005)

@@ -3,6 +3,7 @@ import time
 import cv2
 import queue
 from Client.Comms.audioComm import AudioServer
+from Client.Devices.ScreenCapture import ScreenCaptureControl
 from Client.Protocol import clientProtocol
 from Client.Comms.ClientServerComm import ClientServer
 from Client.Logic.callParticipant import CallParticipant
@@ -10,7 +11,7 @@ from Client.Logic.callParticipant import CallParticipant
 
 class Host(CallParticipant):
     def __init__(self, port, meeting_key, comm, meeting_code, username,
-                 video_port=5000, audio_port=3000):
+                 video_port=5000, audio_port=3000, participant_id=None):
         """
         Initialize the host participant: shared devices via parent, plus
         the host-side TCP server and AudioServer for managing guests.
@@ -29,12 +30,17 @@ class Host(CallParticipant):
             username=username,
             fallback_target_ip="8.8.8.8",
             playout_delay=0.03,
-            video_port=video_port
+            video_port=video_port,
+            participant_id=participant_id
         )
 
         self.msgQ = queue.Queue()
         self.host_server = ClientServer(port, self.msgQ, self.open_clients, self.AES)
         self.audio_comm = AudioServer(port=audio_port, AES=self.AES, open_clients=self.open_clients)
+        self.screen_capture = ScreenCaptureControl(max_width=1280, max_height=720, fps=12)
+        self.screen_share_send_interval = 1 / 12.0
+        self.last_screen_share_send_time = 0
+        self.last_screen_share_error = ""
 
         self.commands = {
             "hj": self.handle_join,
@@ -42,6 +48,7 @@ class Host(CallParticipant):
             "fd": self.on_meeting_closed_by_server,
             "tm": self.handle_mic_status,
             "cs": self.handle_camera_state,
+            "tc": self.handle_chat_message,
         }
 
     def _default_client_entry(self, ip):
@@ -52,6 +59,30 @@ class Host(CallParticipant):
         :return: List placeholder [socket, port].
         """
         return [None, 0]
+
+    def _resolve_video_sender(self, addr):
+        """
+        Resolve UDP video senders to participant ids when the address is unambiguous.
+        Multiple same-machine guests share the same UDP address/port, so their camera
+        frames are skipped rather than creating a duplicate raw-IP tile.
+        """
+        sender_address = addr[0]
+        matches = []
+        for participant_id, value in self.open_clients.items():
+            address = ""
+            if isinstance(value, dict):
+                address = value.get("address", "")
+            elif isinstance(value, list) and len(value) >= 5:
+                address = value[4]
+            if address == sender_address:
+                matches.append(participant_id)
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            return None
+        if sender_address == self.network_ip:
+            return None
+        return sender_address
 
     def _pre_start(self):
         """
@@ -67,6 +98,7 @@ class Host(CallParticipant):
         threading.Thread(target=self.handle_msgs_from_guests, daemon=True).start()
         threading.Thread(target=self.receive_audio_loop, daemon=True).start()
         threading.Thread(target=self.host_audio_send_loop, daemon=True).start()
+        threading.Thread(target=self.screen_share_send_loop, daemon=True).start()
 
     def _send_video(self, frame, timestamp):
         """
@@ -120,12 +152,50 @@ class Host(CallParticipant):
                     continue
 
                 timestamp = time.time() - self.meeting_start_time
-                audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.ip)
-                self.audio_comm.broadcast_audio(audio_msg, self.ip)
+                audio_msg = clientProtocol.build_audio_msg(timestamp, audio_chunk, self.participant_id)
+                self.audio_comm.broadcast_audio(audio_msg, self.participant_id)
 
             except Exception as e:
                 print("host_audio_send_loop error:", e)
                 time.sleep(0.02)
+
+    def screen_share_send_loop(self):
+        """
+        Capture the host's screen and broadcast it as a separate video stream.
+        """
+        while self.running:
+            try:
+                if not self.screen_share_active or self.meeting_start_time is None:
+                    time.sleep(0.05)
+                    continue
+                now = time.time()
+                if now - self.last_screen_share_send_time < self.screen_share_send_interval:
+                    time.sleep(0.01)
+                    continue
+                frame = self.screen_capture.get_frame()
+                if frame is None:
+                    self.last_screen_share_error = getattr(self.screen_capture, "last_error", "")
+                    time.sleep(0.03)
+                    continue
+                self.last_screen_share_send_time = now
+                self.last_screen_share_error = ""
+                timestamp = now - self.meeting_start_time
+
+                while self.screen_share_queue.qsize() >= 2:
+                    try:
+                        self.screen_share_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                self.latest_screen_frame = frame
+                self.last_screen_received_time = time.monotonic()
+                self.screen_share_queue.put((self.participant_id, frame))
+
+                ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
+                if ok:
+                    self.video_comm.send_frame(encoded.tobytes(), timestamp, stream_type="screen")
+            except Exception as e:
+                print("screen_share_send_loop error:", e)
+                time.sleep(0.05)
 
     def handle_msgs_from_client_logic(self, opcode, data):
         """
@@ -180,6 +250,10 @@ class Host(CallParticipant):
             if opcode == "cs":
                 if isinstance(data, list) and len(data) >= 1:
                     data[0] = guest_ip
+
+            if opcode == "tc" and isinstance(data, dict):
+                data["sender_ip"] = guest_ip
+                data["username"] = self._display_name_for_ip(guest_ip)
 
             if opcode in self.commands:
                 try:
@@ -267,13 +341,15 @@ class Host(CallParticipant):
         port = int(data[1])
         client_username = data[3]
 
-        if ip != self.ip:
+        if ip != self.participant_id and ip != self.ip:
             if ip not in self.open_clients:
                 # index 3 = muted; everyone starts muted
-                self.open_clients[ip] = [None, port, client_username, True]
+                client_address = data[4] if len(data) > 4 else ip.split(":")[0]
+                self.open_clients[ip] = [None, port, client_username, True, client_address]
             else:
                 existing_socket = self.open_clients[ip][0] if isinstance(self.open_clients[ip], list) else None
-                self.open_clients[ip] = [existing_socket, port, client_username, True]
+                client_address = data[4] if len(data) > 4 else ip.split(":")[0]
+                self.open_clients[ip] = [existing_socket, port, client_username, True, client_address]
 
             time.sleep(0.1)
 
@@ -291,6 +367,8 @@ class Host(CallParticipant):
                 self.send_meeting_start_time(ip)
                 self.send_username(ip, self.username)
                 self.send_connected_clients(ip)
+                if self.screen_share_active:
+                    self.send_screen_share_state(ip)
 
     def send_meeting_start_time(self, ip):
         """
@@ -319,18 +397,33 @@ class Host(CallParticipant):
         """
         clients_dict = {}
         for ip, value in self.open_clients.items():
-            if ip == target_ip or ip == self.ip:
+            if ip == target_ip or ip == self.participant_id or ip == self.ip:
                 continue
             if isinstance(value, list) and len(value) >= 3:
-                clients_dict[ip] = value[2]
+                clients_dict[ip] = {
+                    "username": value[2],
+                    "address": value[4] if len(value) >= 5 else ip.split(":")[0],
+                }
 
         msg = clientProtocol.build_connected_clients(clients_dict)
+        self.host_server.send_msg(target_ip, msg)
+
+    def send_screen_share_state(self, target_ip):
+        """
+        Tell a newly joined guest that screen share is already active.
+        """
+        msg = clientProtocol.build_screen_share_state(self.participant_id, True)
         self.host_server.send_msg(target_ip, msg)
 
     def _close_comms(self):
         """
         Close the AudioServer and host TCP server after devices are cleaned up.
         """
+        try:
+            self.screen_capture.stop()
+        except Exception as e:
+            print("screen capture close error:", e)
+
         try:
             self.audio_comm.close()
         except Exception as e:
@@ -382,7 +475,7 @@ class Host(CallParticipant):
         :param muted: bool
         """
         try:
-            msg = clientProtocol.build_toggle_mic(self.ip, muted)
+            msg = clientProtocol.build_toggle_mic(self.participant_id, muted)
             self.host_server.broadcast(msg)
         except Exception as e:
             print("broadcast_mic_status error:", e)
@@ -415,10 +508,84 @@ class Host(CallParticipant):
         Host changed their own camera. Broadcast to all guests.
         """
         try:
-            msg = clientProtocol.build_camera_state(self.ip, is_on)
+            msg = clientProtocol.build_camera_state(self.participant_id, is_on)
             self.host_server.broadcast(msg)
         except Exception as e:
             print("notify_camera_state error:", e)
+
+    def toggle_screen_share(self, is_sharing):
+        """
+        Host control used by the GUI to start or stop screen sharing.
+        """
+        try:
+            if is_sharing:
+                self.last_screen_share_error = ""
+                while not self.screen_share_queue.empty():
+                    try:
+                        self.screen_share_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                self.screen_capture.start()
+                self.screen_share_active = True
+                self.screen_share_owner_ip = self.participant_id
+                self.last_screen_received_time = time.monotonic()
+                self.last_screen_share_send_time = 0
+                msg = clientProtocol.build_screen_share_state(self.participant_id, True)
+                self.host_server.broadcast(msg)
+                return True
+            self.screen_share_active = False
+            self.screen_share_owner_ip = None
+            self.latest_screen_frame = None
+            self.last_screen_received_time = 0
+            self.last_screen_share_error = ""
+            self.screen_capture.stop()
+            while not self.screen_share_queue.empty():
+                try:
+                    self.screen_share_queue.get_nowait()
+                except queue.Empty:
+                    break
+            msg = clientProtocol.build_screen_share_state(self.participant_id, False)
+            self.host_server.broadcast(msg)
+            return True
+        except Exception as e:
+            print("toggle_screen_share error:", e)
+            return False
+
+    def handle_chat_message(self, data):
+        """
+        Store a guest chat message locally and relay it to every other guest.
+        """
+        if not isinstance(data, dict):
+            return
+        sender_ip = data.get("sender_ip", "")
+        username = data.get("username") or self._display_name_for_ip(sender_ip)
+        text = data.get("text", "")
+        timestamp = data.get("timestamp", time.time())
+        self._queue_chat_message(sender_ip, username, text, timestamp)
+        try:
+            relay = clientProtocol.build_chat_message(sender_ip, username, text, timestamp)
+            for ip in list(self.open_clients.keys()):
+                if ip != sender_ip:
+                    self.host_server.send_msg(ip, relay)
+        except Exception as e:
+            print("chat relay error:", e)
+
+    def send_chat_message(self, text):
+        """
+        Send a host chat message to every guest.
+        """
+        text = (text or "").strip()
+        if not text:
+            return False
+        timestamp = time.time()
+        self._queue_chat_message(self.participant_id, self.username or "You", text, timestamp)
+        try:
+            msg = clientProtocol.build_chat_message(self.participant_id, self.username, text, timestamp)
+            self.host_server.broadcast(msg)
+            return True
+        except Exception as e:
+            print("send_chat_message error:", e)
+            return False
 
     def on_meeting_closed_by_server(self, data=None):
         """
