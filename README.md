@@ -78,9 +78,9 @@ The application uses a distributed architecture with centralized server coordina
 
 ### Network Channels
 
-| Channel     | Transport   | Purpose                                    |
-|-------------|-------------|--------------------------------------------|
+| Channel     | Transport    | Purpose                                    |
+|-------------|--------------|--------------------------------------------|
 | **Signalling** | TCP → Server | Login, meeting creation, and management  |
 | **Control**    | TCP → Host   | Mute/camera state, join, leave events    |
 | **Video**      | UDP          | JPEG frames at 15 FPS                    |
-| **Audio**      | UDP          | 16-bit PCM audio at 16 kHz               |
+| **Audio**      | TCP          | 16-bit PCM audio at 16 kHz               |

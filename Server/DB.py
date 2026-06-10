@@ -6,8 +6,10 @@ import hmac
 
 class DB:
     def __init__(self):
+        # Store the SQLite file beside this module, regardless of launch directory.
         _here = os.path.dirname(os.path.abspath(__file__))
         self.DBname = os.path.join(_here, "UserManagementDB.db")
+        # conn is the database connection; curr executes SQL statements.
         self.conn = None
         self.curr = None
         self._createDB()
@@ -45,35 +47,40 @@ class DB:
 
     def hash_password(self, password):
         """
-        Return hashed password with salt.
+        Create a salted PBKDF2 password hash for database storage.
         :param password:
-        :return:
+        :return: "salt_in_hex$hash_in_hex"
         """
+        # A new 16-byte cryptographically random salt is generated for every
+        # password. Therefore, equal passwords normally produce different hashes.
         salt = os.urandom(16)
-        # pbkdf2_hmac for slow cracking
-        # runs sha 256 100k times
-        # prevents brute force attacks
+        # PBKDF2-HMAC-SHA256 deliberately performs 100,000 iterations. This makes
+        # each password guess more expensive and slows brute-force attacks.
         hashed = hashlib.pbkdf2_hmac(
             "sha256",
             password.encode(),
             salt,
             100000
         )
+        # The salt is not secret. It must be stored so login can calculate the
+        # same hash again. Hex encoding makes both byte values safe to store as TEXT.
         return f"{salt.hex()}${hashed.hex()}"
 
     def verify_password(self, password, saved_password):
         """
-        Check if password matches saved hash.
+        Hash the entered password with the stored salt and compare the results.
         :param password:
-        :param saved_password:
+        :param saved_password: Database value in "salt_hex$hash_hex" format.
         :return:
         """
         result = False
         try:
+            # Recover the exact salt and expected hash used during registration.
             salt_hex, hash_hex = saved_password.split("$")
             salt = bytes.fromhex(salt_hex)
             saved_hash = bytes.fromhex(hash_hex)
 
+            # Use the same algorithm, salt, and iteration count as hash_password().
             check_hash = hashlib.pbkdf2_hmac(
                 "sha256",
                 password.encode(),
@@ -81,6 +88,7 @@ class DB:
                 100000
             )
 
+            # compare_digest avoids leaking comparison progress through timing.
             result = hmac.compare_digest(check_hash, saved_hash)
         except Exception:
             pass
@@ -101,6 +109,7 @@ class DB:
         elif self.user_exists(userName):
             pass
         else:
+            # Only the salt and derived hash are stored, never the plain password.
             hashed_password = self.hash_password(password)
             sql = "INSERT INTO users VALUES (?, ?)"
             self.curr.execute(sql, (userName, hashed_password))
